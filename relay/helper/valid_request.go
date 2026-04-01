@@ -253,6 +253,9 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 	if err != nil {
 		return nil, err
 	}
+	if err := applyResponsesCompatForChatCompletions(c, relayMode, textRequest); err != nil {
+		return nil, err
+	}
 
 	if relayMode == relayconstant.RelayModeModerations && textRequest.Model == "" {
 		textRequest.Model = "text-moderation-latest"
@@ -303,6 +306,354 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 		}
 	}
 	return textRequest, nil
+}
+
+func applyResponsesCompatForChatCompletions(c *gin.Context, relayMode int, textRequest *dto.GeneralOpenAIRequest) error {
+	if relayMode != relayconstant.RelayModeChatCompletions || textRequest == nil {
+		return nil
+	}
+	if len(textRequest.Messages) > 0 || textRequest.Prefix != nil || textRequest.Suffix != nil {
+		return nil
+	}
+
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return err
+	}
+	requestBody, err := storage.Bytes()
+	if err != nil {
+		return err
+	}
+	if len(strings.TrimSpace(string(requestBody))) == 0 {
+		return nil
+	}
+
+	responsesRequest := &dto.OpenAIResponsesRequest{}
+	if err := common.Unmarshal(requestBody, responsesRequest); err != nil {
+		return nil
+	}
+	if responsesRequest.Input == nil && len(responsesRequest.Instructions) == 0 {
+		return nil
+	}
+
+	converted, err := convertResponsesCompatToChatCompletionsRequest(responsesRequest)
+	if err != nil {
+		return err
+	}
+	*textRequest = *converted
+	return nil
+}
+
+func convertResponsesCompatToChatCompletionsRequest(request *dto.OpenAIResponsesRequest) (*dto.GeneralOpenAIRequest, error) {
+	if request == nil {
+		return nil, errors.New("request is nil")
+	}
+
+	reasoningEffort := ""
+	if request.Reasoning != nil {
+		reasoningEffort = strings.TrimSpace(request.Reasoning.Effort)
+	}
+	promptCacheKey := ""
+	if len(request.PromptCacheKey) > 0 {
+		if text, err := responsesCompatJSONString(request.PromptCacheKey); err == nil {
+			promptCacheKey = text
+		}
+	}
+	var serviceTier json.RawMessage
+	if request.ServiceTier != "" {
+		serviceTier, _ = common.Marshal(request.ServiceTier)
+	}
+
+	chatRequest := &dto.GeneralOpenAIRequest{
+		Model:                request.Model,
+		Stream:               request.Stream,
+		StreamOptions:        request.StreamOptions,
+		MaxTokens:            request.MaxOutputTokens,
+		ReasoningEffort:      reasoningEffort,
+		Temperature:          request.Temperature,
+		TopP:                 request.TopP,
+		User:                 request.User,
+		Store:                request.Store,
+		Metadata:             request.Metadata,
+		PromptCacheKey:       promptCacheKey,
+		PromptCacheRetention: request.PromptCacheRetention,
+		SafetyIdentifier:     request.SafetyIdentifier,
+		ServiceTier:          serviceTier,
+	}
+	if len(request.ParallelToolCalls) > 0 {
+		var parallelToolCalls bool
+		if err := common.Unmarshal(request.ParallelToolCalls, &parallelToolCalls); err == nil {
+			chatRequest.ParallelTooCalls = common.GetPointer(parallelToolCalls)
+		}
+	}
+	if len(request.ToolChoice) > 0 {
+		toolChoice, err := convertResponsesCompatToolChoice(request.ToolChoice)
+		if err != nil {
+			return nil, err
+		}
+		chatRequest.ToolChoice = toolChoice
+	}
+	if len(request.Tools) > 0 {
+		tools, err := convertResponsesCompatTools(request.Tools)
+		if err != nil {
+			return nil, err
+		}
+		chatRequest.Tools = tools
+	}
+
+	messages := make([]dto.Message, 0)
+	if len(request.Instructions) > 0 {
+		instructionText, err := responsesCompatJSONString(request.Instructions)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(instructionText) != "" {
+			messages = append(messages, dto.Message{
+				Role:    chatRequest.GetSystemRoleName(),
+				Content: instructionText,
+			})
+		}
+	}
+
+	inputMessages, err := convertResponsesCompatInputToMessages(request.Input, chatRequest.GetSystemRoleName())
+	if err != nil {
+		return nil, err
+	}
+	messages = append(messages, inputMessages...)
+	chatRequest.Messages = messages
+	return chatRequest, nil
+}
+
+func convertResponsesCompatToolChoice(raw json.RawMessage) (any, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	jsonType := common.GetJsonType(raw)
+	if jsonType == "string" {
+		var toolChoice string
+		if err := common.Unmarshal(raw, &toolChoice); err != nil {
+			return nil, err
+		}
+		return toolChoice, nil
+	}
+
+	var toolChoice map[string]any
+	if err := common.Unmarshal(raw, &toolChoice); err != nil {
+		return nil, err
+	}
+	if common.Interface2String(toolChoice["type"]) != "function" {
+		return toolChoice, nil
+	}
+	name := common.Interface2String(toolChoice["name"])
+	if name == "" {
+		return toolChoice, nil
+	}
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name": name,
+		},
+	}, nil
+}
+
+func convertResponsesCompatTools(raw json.RawMessage) ([]dto.ToolCallRequest, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var toolsMap []map[string]any
+	if err := common.Unmarshal(raw, &toolsMap); err != nil {
+		return nil, err
+	}
+	tools := make([]dto.ToolCallRequest, 0, len(toolsMap))
+	for _, toolMap := range toolsMap {
+		toolType := strings.TrimSpace(common.Interface2String(toolMap["type"]))
+		if toolType != "" && toolType != "function" {
+			continue
+		}
+		name := strings.TrimSpace(common.Interface2String(toolMap["name"]))
+		if name == "" {
+			continue
+		}
+		tools = append(tools, dto.ToolCallRequest{
+			Type: "function",
+			Function: dto.FunctionRequest{
+				Name:        name,
+				Description: common.Interface2String(toolMap["description"]),
+				Parameters:  toolMap["parameters"],
+			},
+		})
+	}
+	return tools, nil
+}
+
+func convertResponsesCompatInputToMessages(raw json.RawMessage, systemRole string) ([]dto.Message, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	jsonType := common.GetJsonType(raw)
+	if jsonType == "string" {
+		text, err := responsesCompatJSONString(raw)
+		if err != nil {
+			return nil, err
+		}
+		return []dto.Message{{Role: "user", Content: text}}, nil
+	}
+	if jsonType != "array" {
+		return nil, nil
+	}
+
+	var items []map[string]any
+	if err := common.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	messages := make([]dto.Message, 0, len(items))
+	for _, item := range items {
+		itemType := strings.TrimSpace(common.Interface2String(item["type"]))
+		if itemType == "" && strings.TrimSpace(common.Interface2String(item["role"])) != "" {
+			itemType = "message"
+		}
+
+		switch itemType {
+		case "message", "":
+			message, ok, err := convertResponsesCompatMessage(item, systemRole)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				messages = append(messages, message)
+			}
+		case "function_call":
+			message, ok := convertResponsesCompatFunctionCall(item)
+			if ok {
+				messages = append(messages, message)
+			}
+		case "function_call_output":
+			message, ok, err := convertResponsesCompatFunctionCallOutput(item)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				messages = append(messages, message)
+			}
+		}
+	}
+	return messages, nil
+}
+
+func convertResponsesCompatMessage(item map[string]any, systemRole string) (dto.Message, bool, error) {
+	role := strings.TrimSpace(common.Interface2String(item["role"]))
+	if role == "" {
+		role = "user"
+	}
+	if role == "developer" || role == "system" {
+		role = systemRole
+	}
+
+	message := dto.Message{Role: role}
+	content, ok := item["content"]
+	if !ok || content == nil {
+		message.Content = ""
+		return message, true, nil
+	}
+	if contentStr, ok := content.(string); ok {
+		message.Content = contentStr
+		return message, true, nil
+	}
+
+	contentList, ok := content.([]any)
+	if !ok {
+		return dto.Message{}, false, nil
+	}
+	parts := make([]dto.MediaContent, 0, len(contentList))
+	for _, contentItem := range contentList {
+		partMap, ok := contentItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		partType := strings.TrimSpace(common.Interface2String(partMap["type"]))
+		if partType == "" {
+			partType = "input_text"
+		}
+		switch partType {
+		case "input_text", "output_text":
+			parts = append(parts, dto.MediaContent{Type: dto.ContentTypeText, Text: common.Interface2String(partMap["text"])})
+		case "input_image":
+			imageURL := partMap["image_url"]
+			if imageURL == nil {
+				continue
+			}
+			parts = append(parts, dto.MediaContent{Type: dto.ContentTypeImageURL, ImageUrl: imageURL})
+		}
+	}
+	if len(parts) == 0 {
+		return dto.Message{}, false, nil
+	}
+	message.SetMediaContent(parts)
+	return message, true, nil
+}
+
+func convertResponsesCompatFunctionCall(item map[string]any) (dto.Message, bool) {
+	callID := strings.TrimSpace(common.Interface2String(item["call_id"]))
+	name := strings.TrimSpace(common.Interface2String(item["name"]))
+	if callID == "" || name == "" {
+		return dto.Message{}, false
+	}
+	arguments := common.Interface2String(item["arguments"])
+	message := dto.Message{
+		Role:    "assistant",
+		Content: "",
+	}
+	message.SetToolCalls([]dto.ToolCallRequest{{
+		ID:   callID,
+		Type: "function",
+		Function: dto.FunctionRequest{
+			Name:      name,
+			Arguments: arguments,
+		},
+	}})
+	return message, true
+}
+
+func convertResponsesCompatFunctionCallOutput(item map[string]any) (dto.Message, bool, error) {
+	callID := strings.TrimSpace(common.Interface2String(item["call_id"]))
+	if callID == "" {
+		return dto.Message{}, false, nil
+	}
+	output := item["output"]
+	if output == nil {
+		output = ""
+	}
+	content, err := responsesCompatAnyToString(output)
+	if err != nil {
+		return dto.Message{}, false, err
+	}
+	return dto.Message{
+		Role:       "tool",
+		ToolCallId: callID,
+		Content:    content,
+	}, true, nil
+}
+
+func responsesCompatJSONString(raw json.RawMessage) (string, error) {
+	var text string
+	if err := common.Unmarshal(raw, &text); err != nil {
+		return "", err
+	}
+	return text, nil
+}
+
+func responsesCompatAnyToString(value any) (string, error) {
+	if value == nil {
+		return "", nil
+	}
+	if text, ok := value.(string); ok {
+		return text, nil
+	}
+	data, err := common.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func GetAndValidateGeminiRequest(c *gin.Context) (*dto.GeminiChatRequest, error) {
