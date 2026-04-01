@@ -8,6 +8,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  HAS_BT_DEPLOY_WEBHOOK: ${{ secrets.BT_DEPLOY_WEBHOOK != '' }}
 
 jobs:
   docker:
@@ -64,5 +65,23 @@ jobs:
       - name: Summarize published image
         run: |
           echo "## Published image" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \\`${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest\\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \\`${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:sha-${{ steps.sha.outputs.short }}\\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:sha-${{ steps.sha.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger Baota deploy webhook
+        if: ${{ env.HAS_BT_DEPLOY_WEBHOOK == 'true' }}
+        env:
+          BT_DEPLOY_WEBHOOK: ${{ secrets.BT_DEPLOY_WEBHOOK }}
+        run: |
+          curl --fail --show-error --silent \
+            -X POST "$BT_DEPLOY_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            --data-binary @- <<EOF
+          {
+            "status": "success",
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.ref_name }}",
+            "sha": "${{ github.sha }}",
+            "image": "${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest"
+          }
+          EOF
