@@ -36,7 +36,6 @@ export let API = axios.create({
   },
 });
 
-
 function redirectToOAuthUrl(url, options = {}) {
   const { openInNewTab = false } = options;
   const targetUrl = typeof url === 'string' ? url : url.toString();
@@ -48,7 +47,6 @@ function redirectToOAuthUrl(url, options = {}) {
 
   window.location.assign(targetUrl);
 }
-
 
 function patchAPIInstance(instance) {
   const originalGet = instance.get.bind(instance);
@@ -193,9 +191,9 @@ export const processModelsData = (data, currentModel) => {
   const selectedModel =
     hasCurrentModel && modelOptions.length > 0
       ? currentModel
-      : modelOptions[0]?.value;
+      : modelOptions[0]?.value || '';
 
-  return { modelOptions, selectedModel };
+  return { modelOptions, selectedModel, hasCurrentModel };
 };
 
 // 处理分组数据
