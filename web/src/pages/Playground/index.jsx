@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useCallback, useRef } from 'react';
+import React, { useContext, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Layout, Toast, Modal } from '@douyinfe/semi-ui';
@@ -235,9 +235,28 @@ const Playground = () => {
     }
   }, [inputs, parameterEnabled, message, customRequestMode, customRequestBody]);
 
+  const isCurrentModelAvailable = useCallback(() => {
+    if (!inputs.model) {
+      Toast.warning(t('请先选择模型'));
+      return false;
+    }
+
+    const hasMatchingModel = models.some((option) => option.value === inputs.model);
+    if (!hasMatchingModel) {
+      Toast.warning(t('当前分组不包含该模型，请重新选择'));
+      return false;
+    }
+
+    return true;
+  }, [inputs.model, models, t]);
+
   // 发送消息
   function onMessageSend(content, attachment) {
     console.log('attachment: ', attachment);
+
+    if (!customRequestMode && !isCurrentModelAvailable()) {
+      return;
+    }
 
     // 创建用户消息和加载消息
     const userMessage = createMessage(MESSAGE_ROLES.USER, content);

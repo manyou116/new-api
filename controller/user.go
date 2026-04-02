@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -519,15 +520,49 @@ func GetUserModels(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	groups := service.GetUserUsableGroups(user.Group)
-	var models []string
-	for group := range groups {
-		for _, g := range model.GetGroupEnabledModels(group) {
-			if !common.StringsContains(models, g) {
-				models = append(models, g)
-			}
+
+	requestedGroup := strings.TrimSpace(c.Query("group"))
+	userUsableGroups := service.GetUserUsableGroups(user.Group)
+	modelSet := make(map[string]struct{})
+	appendGroupModels := func(group string) {
+		for _, groupModel := range model.GetGroupEnabledModels(group) {
+			modelSet[groupModel] = struct{}{}
 		}
 	}
+
+	switch requestedGroup {
+	case "":
+		for group := range userUsableGroups {
+			appendGroupModels(group)
+		}
+	case "auto":
+		if _, ok := userUsableGroups[requestedGroup]; !ok {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "无权访问该分组",
+			})
+			return
+		}
+		for _, autoGroup := range service.GetUserAutoGroup(user.Group) {
+			appendGroupModels(autoGroup)
+		}
+	default:
+		if _, ok := userUsableGroups[requestedGroup]; !ok && requestedGroup != user.Group {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "无权访问该分组",
+			})
+			return
+		}
+		appendGroupModels(requestedGroup)
+	}
+
+	models := make([]string, 0, len(modelSet))
+	for groupModel := range modelSet {
+		models = append(models, groupModel)
+	}
+	sort.Strings(models)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
