@@ -41,6 +41,7 @@ import {
   IconGithubLogo,
 } from '@douyinfe/semi-icons';
 import { SiDiscord, SiTelegram, SiWechat, SiLinux } from 'react-icons/si';
+import YaohuoIcon from '../../../common/logo/YaohuoIcon';
 
 const { Text } = Typography;
 
@@ -92,6 +93,7 @@ const UserBindingManagementModal = ({
           wechat_id: userData.wechat_id || '',
           telegram_id: userData.telegram_id || '',
           linux_do_id: userData.linux_do_id || '',
+          yaohuo_id: userData.yaohuo_id || '',
         });
       } else {
         showError(userRes.data?.message || t('操作失败'));
@@ -270,6 +272,19 @@ const UserBindingManagementModal = ({
       value: getBuiltInBindingValue('linux_do_id'),
       icon: (
         <SiLinux size={20} className='text-slate-600 dark:text-slate-300' />
+      ),
+    },
+    {
+      key: 'yaohuo',
+      field: 'yaohuo_id',
+      name: t('妖火'),
+      enabled: Boolean(statusInfo.yaohuo_oauth),
+      value: getBuiltInBindingValue('yaohuo_id'),
+      icon: (
+        <YaohuoIcon
+          height={20}
+          className='text-slate-600 dark:text-slate-300'
+        />
       ),
     },
   ];

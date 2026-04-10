@@ -54,10 +54,12 @@ import {
 import {
   onGitHubOAuthClicked,
   onLinuxDOOAuthClicked,
+  onYaohuoOAuthClicked,
   onOIDCClicked,
 } from '../../helpers';
 import OIDCIcon from '../common/logo/OIDCIcon';
 import LinuxDoIcon from '../common/logo/LinuxDoIcon';
+import YaohuoIcon from '../common/logo/YaohuoIcon';
 import WeChatIcon from '../common/logo/WeChatIcon';
 import TelegramLoginButton from 'react-telegram-login/src';
 import { UserContext } from '../../context/User';
@@ -94,6 +96,7 @@ const RegisterForm = () => {
   const [discordLoading, setDiscordLoading] = useState(false);
   const [oidcLoading, setOidcLoading] = useState(false);
   const [linuxdoLoading, setLinuxdoLoading] = useState(false);
+  const [yaohuoLoading, setYaohuoLoading] = useState(false);
   const [emailRegisterLoading, setEmailRegisterLoading] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [verificationCodeLoading, setVerificationCodeLoading] = useState(false);
@@ -137,6 +140,7 @@ const RegisterForm = () => {
       status.oidc_enabled ||
       status.wechat_login ||
       status.linuxdo_oauth ||
+      status.yaohuo_oauth ||
       status.telegram_oauth ||
       hasCustomOAuthProviders,
   );
@@ -333,6 +337,15 @@ const RegisterForm = () => {
     }
   };
 
+  const handleYaohuoClick = () => {
+    setYaohuoLoading(true);
+    try {
+      onYaohuoOAuthClicked(status.yaohuo_client_id, { shouldLogout: true });
+    } finally {
+      setTimeout(() => setYaohuoLoading(false), 3000);
+    }
+  };
+
   const handleCustomOAuthClick = (provider) => {
     setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: true }));
     try {
@@ -491,6 +504,23 @@ const RegisterForm = () => {
                     loading={linuxdoLoading}
                   >
                     <span className='ml-3'>{t('使用 LinuxDO 继续')}</span>
+                  </Button>
+                )}
+
+                {status.yaohuo_oauth && (
+                  <Button
+                    theme='outline'
+                    className='w-full h-12 flex items-center justify-center !rounded-full border border-gray-200 hover:bg-gray-50 transition-colors'
+                    type='tertiary'
+                    icon={
+                      <YaohuoIcon
+                        height={24}
+                      />
+                    }
+                    onClick={handleYaohuoClick}
+                    loading={yaohuoLoading}
+                  >
+                    <span className='ml-3'>{t('使用 妖火 继续')}</span>
                   </Button>
                 )}
 

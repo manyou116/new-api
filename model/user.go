@@ -47,6 +47,7 @@ type User struct {
 	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
 	DeletedAt        gorm.DeletedAt `gorm:"index"`
 	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	YaohuoId         string         `json:"yaohuo_id" gorm:"column:yaohuo_id;index"`
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
@@ -61,6 +62,7 @@ func (user *User) ToBaseUser() *UserBase {
 		Username: user.Username,
 		Setting:  user.Setting,
 		Email:    user.Email,
+		YaohuoId: user.YaohuoId,
 	}
 	return cache
 }
@@ -552,6 +554,7 @@ func (user *User) ClearBinding(bindingType string) error {
 		"wechat":   "wechat_id",
 		"telegram": "telegram_id",
 		"linuxdo":  "linux_do_id",
+		"yaohuo":   "yaohuo_id",
 	}
 
 	column, ok := bindingColumnMap[bindingType]
@@ -1037,3 +1040,18 @@ func RootUserExists() bool {
 	}
 	return true
 }
+
+func IsYaohuoIdAlreadyTaken(yaohuoId string) bool {
+	var user User
+	err := DB.Unscoped().Where("yaohuo_id = ?", yaohuoId).First(&user).Error
+	return !errors.Is(err, gorm.ErrRecordNotFound)
+}
+
+func (user *User) FillUserByYaohuoId() error {
+	if user.YaohuoId == "" {
+		return errors.New("yaohuo id is empty")
+	}
+	err := DB.Where("yaohuo_id = ?", user.YaohuoId).First(user).Error
+	return err
+}
+

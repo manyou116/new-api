@@ -95,10 +95,14 @@ const SystemSetting = () => {
     TelegramOAuthEnabled: '',
     TelegramBotToken: '',
     TelegramBotName: '',
-    LinuxDOOAuthEnabled: '',
     LinuxDOClientId: '',
     LinuxDOClientSecret: '',
     LinuxDOMinimumTrustLevel: '',
+    YaohuoOAuthEnabled: '',
+    YaohuoClientId: '',
+    YaohuoClientSecret: '',
+    QuotaForYaohuoRegister: '',
+    QuotaForYaohuoBind: '',
     ServerAddress: '',
     // SSRF防护配置
     'fetch_setting.enable_ssrf_protection': true,
@@ -183,6 +187,7 @@ const SystemSetting = () => {
           case 'EmailAliasRestrictionEnabled':
           case 'SMTPSSLEnabled':
           case 'LinuxDOOAuthEnabled':
+          case 'YaohuoOAuthEnabled':
           case 'discord.enabled':
           case 'oidc.enabled':
           case 'passkey.enabled':
@@ -637,6 +642,41 @@ const SystemSetting = () => {
     }
   };
 
+  const submitYaohuoOAuth = async () => {
+    const options = [];
+
+    if (originInputs['YaohuoClientId'] !== inputs.YaohuoClientId) {
+      options.push({ key: 'YaohuoClientId', value: inputs.YaohuoClientId });
+    }
+    if (
+      originInputs['YaohuoClientSecret'] !== inputs.YaohuoClientSecret &&
+      inputs.YaohuoClientSecret !== ''
+    ) {
+      options.push({
+        key: 'YaohuoClientSecret',
+        value: inputs.YaohuoClientSecret,
+      });
+    }
+    if (
+      originInputs['QuotaForYaohuoRegister'] !== inputs.QuotaForYaohuoRegister
+    ) {
+      options.push({
+        key: 'QuotaForYaohuoRegister',
+        value: inputs.QuotaForYaohuoRegister,
+      });
+    }
+    if (originInputs['QuotaForYaohuoBind'] !== inputs.QuotaForYaohuoBind) {
+      options.push({
+        key: 'QuotaForYaohuoBind',
+        value: inputs.QuotaForYaohuoBind,
+      });
+    }
+
+    if (options.length > 0) {
+      await updateOptions(options);
+    }
+  };
+
   const submitPasskeySettings = async () => {
     // 使用formApi直接获取当前表单值
     const formValues = formApiRef.current?.getValues() || {};
@@ -1061,6 +1101,15 @@ const SystemSetting = () => {
                         }
                       >
                         {t('允许通过 Linux DO 账户登录 & 注册')}
+                      </Form.Checkbox>
+                      <Form.Checkbox
+                        field='YaohuoOAuthEnabled'
+                        noLabel
+                        onChange={(e) =>
+                          handleCheckboxChange('YaohuoOAuthEnabled', e)
+                        }
+                      >
+                        {t('允许通过妖火账户登录 & 注册')}
                       </Form.Checkbox>
                       <Form.Checkbox
                         field='WeChatAuthEnabled'
@@ -1531,6 +1580,58 @@ const SystemSetting = () => {
                   </Row>
                   <Button onClick={submitLinuxDOOAuth}>
                     {t('保存 Linux DO OAuth 设置')}
+                  </Button>
+                </Form.Section>
+              </Card>
+
+              <Card>
+                <Form.Section text={t('配置妖火 OAuth')}>
+                  <Text>{t('用以支持通过妖火 (yaohuo.me) 进行登录注册')}</Text>
+                  <Banner
+                    type='info'
+                    description={`${t('回调 URL 填')} ${inputs.ServerAddress ? inputs.ServerAddress : t('网站地址')}/oauth/yaohuo`}
+                    style={{ marginBottom: 20, marginTop: 16 }}
+                  />
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                  >
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.Input
+                        field='YaohuoClientId'
+                        label={t('妖火 Client ID')}
+                        placeholder={t('输入你在妖火注册的 OAuth APP 的 ID')}
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.Input
+                        field='YaohuoClientSecret'
+                        label={t('妖火 Client Secret')}
+                        type='password'
+                        placeholder={t('敏感信息不会发送到前端显示')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                    style={{ marginTop: 16 }}
+                  >
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.InputNumber
+                        field='QuotaForYaohuoRegister'
+                        label={t('通过妖火注册奖励额度')}
+                        placeholder={t('例如：1048576，设为 0 则不额外奖励')}
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.InputNumber
+                        field='QuotaForYaohuoBind'
+                        label={t('绑定妖火奖励额度')}
+                        placeholder={t('例如：524288，设为 0 则不额外奖励')}
+                      />
+                    </Col>
+                  </Row>
+                  <Button onClick={submitYaohuoOAuth} style={{ marginTop: 16 }}>
+                    {t('保存妖火 OAuth 设置')}
                   </Button>
                 </Form.Section>
               </Card>

@@ -155,6 +155,14 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "YaohuoOAuthEnabled":
+		if option.Value == "true" && common.YaohuoClientId == "" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法启用妖火 OAuth，请先填入妖火 Client Id 以及 Client Secret！",
+			})
+			return
+		}
 	case "EmailDomainRestrictionEnabled":
 		if option.Value == "true" && len(common.EmailDomainWhitelist) == 0 {
 			c.JSON(http.StatusOK, gin.H{

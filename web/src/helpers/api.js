@@ -302,6 +302,19 @@ export async function onLinuxDOOAuthClicked(
   );
 }
 
+export async function onYaohuoOAuthClicked(
+  yaohuo_client_id,
+  options = { shouldLogout: false },
+) {
+  const state = await prepareOAuthState(options);
+  if (!state) return;
+  const redirect_uri = `${window.location.origin}/oauth/yaohuo`;
+  redirectToOAuthUrl(
+    `https://yaohuo.me/OAuth/Authorize.aspx?response_type=code&client_id=${yaohuo_client_id}&redirect_uri=${redirect_uri}&scope=profile&state=${state}`,
+  );
+}
+
+
 /**
  * Initiate custom OAuth login
  * @param {Object} provider - Custom OAuth provider config from status API
