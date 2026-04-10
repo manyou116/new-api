@@ -193,6 +193,14 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
 		"action": "bind",
 	})
+
+	// Give bonus quota if the provider supports it (e.g., Yaohuo)
+	if bonusProvider, ok := provider.(oauth.OAuthBonusProvider); ok {
+		session := sessions.Default(c)
+		if id := session.Get("id"); id != nil {
+			bonusProvider.BonusOnBind(id.(int))
+		}
+	}
 }
 
 // findOrCreateOAuthUser finds existing user or creates new user
@@ -296,6 +304,10 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 
 		// Perform post-transaction tasks (logs, sidebar config, inviter rewards)
 		user.FinalizeOAuthUserCreation(inviterId)
+		// Give bonus quota if the provider supports it (e.g., Yaohuo)
+		if bonusProvider, ok := provider.(oauth.OAuthBonusProvider); ok {
+			bonusProvider.BonusOnRegister(user.Id)
+		}
 	} else {
 		// Built-in provider: create user and update provider ID in a transaction
 		err := model.DB.Transaction(func(tx *gorm.DB) error {
@@ -313,6 +325,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 				"linux_do_id": user.LinuxDOId,
 				"wechat_id":   user.WeChatId,
 				"telegram_id": user.TelegramId,
+				"yaohuo_id":   user.YaohuoId,
 			}).Error; err != nil {
 				return err
 			}
@@ -325,6 +338,10 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 
 		// Perform post-transaction tasks
 		user.FinalizeOAuthUserCreation(inviterId)
+		// Give bonus quota if the provider supports it (e.g., Yaohuo)
+		if bonusProvider, ok := provider.(oauth.OAuthBonusProvider); ok {
+			bonusProvider.BonusOnRegister(user.Id)
+		}
 	}
 
 	return user, nil

@@ -66,3 +66,12 @@ type AccessDeniedError struct {
 func (e *AccessDeniedError) Error() string {
 	return e.Message
 }
+
+// OAuthBonusProvider is an optional interface that OAuth providers can implement
+// to grant additional quota when users register or bind their account via that provider.
+type OAuthBonusProvider interface {
+	// BonusOnRegister is called after a new user is created via this OAuth provider.
+	BonusOnRegister(userId int)
+	// BonusOnBind is called after an existing user binds their account to this OAuth provider.
+	BonusOnBind(userId int)
+}

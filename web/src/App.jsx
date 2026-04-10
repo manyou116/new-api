@@ -240,6 +240,14 @@ function App() {
           }
         />
         <Route
+          path='/oauth/yaohuo'
+          element={
+            <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+              <OAuth2Callback type='yaohuo'></OAuth2Callback>
+            </Suspense>
+          }
+        />
+        <Route
           path='/oauth/:provider'
           element={
             <Suspense fallback={<Loading></Loading>} key={location.pathname}>
