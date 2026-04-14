@@ -104,7 +104,10 @@ const RechargeCard = ({
   const showAmountSkeleton = useMinimumLoadingTime(amountLoading);
   const [activeTab, setActiveTab] = useState('topup');
   const shouldShowSubscription =
-    !subscriptionLoading && subscriptionPlans.length > 0;
+    subscriptionLoading ||
+    subscriptionPlans.length > 0 ||
+    activeSubscriptions.length > 0 ||
+    allSubscriptions.length > 0;
 
   useEffect(() => {
     if (initialTabSetRef.current) return;

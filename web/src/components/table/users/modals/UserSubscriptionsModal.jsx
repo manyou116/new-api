@@ -33,7 +33,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
-import { API, showError, showSuccess } from '../../../../helpers';
+import { API, showError, showSuccess, renderQuota } from '../../../../helpers';
 import { convertUSDToCurrency } from '../../../../helpers/render';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import CardTable from '../../../common/ui/CardTable';
@@ -259,9 +259,12 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
         width: 180,
         render: (_, record) => {
           const sub = record?.subscription;
+          const planInfo = record?.plan || {};
           const planId = sub?.plan_id;
           const title =
-            planTitleMap.get(planId) || (planId ? `#${planId}` : '-');
+            planInfo?.plan_title ||
+            planTitleMap.get(planId) ||
+            (planId ? `#${planId}` : '-');
           return (
             <div className='min-w-0'>
               <div className='font-medium truncate'>{title}</div>
@@ -297,17 +300,31 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
         },
       },
       {
-        title: t('总额度'),
+        title: t('额度'),
         key: 'total',
-        width: 120,
+        width: 180,
         render: (_, record) => {
           const sub = record?.subscription;
+          const planInfo = record?.plan || {};
           const total = Number(sub?.amount_total || 0);
           const used = Number(sub?.amount_used || 0);
+          const remain = total > 0 ? Math.max(0, total - used) : 0;
+          const isPeriodic =
+            planInfo?.quota_reset_period && planInfo.quota_reset_period !== 'never';
           return (
-            <Text type={total > 0 ? 'secondary' : 'tertiary'}>
-              {total > 0 ? `${used}/${total}` : t('不限')}
-            </Text>
+            <div className='min-w-0'>
+              <Text type={total > 0 ? 'secondary' : 'tertiary'}>
+                {total > 0
+                  ? `${renderQuota(used)}/${renderQuota(total)}`
+                  : t('不限')}
+              </Text>
+              {total > 0 && (
+                <Text type='tertiary' size='small' style={{ display: 'block' }}>
+                  {isPeriodic ? t('当前周期额度') : t('总额度')} · {t('剩余')}{' '}
+                  {renderQuota(remain)}
+                </Text>
+              )}
+            </div>
           );
         },
       },
