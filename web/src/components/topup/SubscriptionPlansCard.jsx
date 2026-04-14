@@ -37,6 +37,7 @@ import SubscriptionPurchaseModal from './modals/SubscriptionPurchaseModal';
 import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
+  getSubscriptionQuotaSummary,
 } from '../../helpers/subscriptionFormat';
 
 const { Text } = Typography;
@@ -47,6 +48,7 @@ function getEpayMethods(payMethods = []) {
     (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem',
   );
 }
+
 
 // 提交易支付表单
 function submitEpayForm({ url, params }) {
@@ -381,6 +383,7 @@ const SubscriptionPlansCard = ({
                   {allSubscriptions.map((sub, subIndex) => {
                     const isLast = subIndex === allSubscriptions.length - 1;
                     const subscription = sub.subscription;
+                    const planInfo = sub.plan || {};
                     const totalAmount = Number(subscription?.amount_total || 0);
                     const usedAmount = Number(subscription?.amount_used || 0);
                     const remainAmount =
@@ -388,7 +391,9 @@ const SubscriptionPlansCard = ({
                         ? Math.max(0, totalAmount - usedAmount)
                         : 0;
                     const planTitle =
-                      planTitleMap.get(subscription?.plan_id) || '';
+                      planInfo?.plan_title ||
+                      planTitleMap.get(subscription?.plan_id) ||
+                      '';
                     const remainDays = getRemainingDays(sub);
                     const usagePercent = getUsagePercent(sub);
                     const now = Date.now() / 1000;
@@ -443,7 +448,10 @@ const SubscriptionPlansCard = ({
                           ).toLocaleString()}
                         </div>
                         <div className='text-xs text-gray-500 mb-2'>
-                          {t('总额度')}:{' '}
+                          {planInfo?.quota_reset_period &&
+                          planInfo.quota_reset_period !== 'never'
+                            ? t('当前周期额度')
+                            : t('总额度')}:{' '}
                           {totalAmount > 0 ? (
                             <Tooltip
                               content={`${t('原生额度')}：${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`}
@@ -489,12 +497,13 @@ const SubscriptionPlansCard = ({
                   Number.isInteger(convertedPrice) ? 0 : 2,
                 );
                 const isPopular = index === 0 && plans.length > 1;
+                const quotaSummary = getSubscriptionQuotaSummary(
+                  plan,
+                  t,
+                  renderQuota,
+                );
                 const limit = Number(plan?.max_purchase_per_user || 0);
                 const limitLabel = limit > 0 ? `${t('限购')} ${limit}` : null;
-                const totalLabel =
-                  totalAmount > 0
-                    ? `${t('总额度')}: ${renderQuota(totalAmount)}`
-                    : `${t('总额度')}: ${t('不限')}`;
                 const upgradeLabel = plan?.upgrade_group
                   ? `${t('升级分组')}: ${plan.upgrade_group}`
                   : null;
@@ -507,12 +516,15 @@ const SubscriptionPlansCard = ({
                     label: `${t('有效期')}: ${formatSubscriptionDuration(plan, t)}`,
                   },
                   resetLabel ? { label: resetLabel } : null,
-                  totalAmount > 0
+                  quotaSummary?.primaryLabel
                     ? {
-                        label: totalLabel,
-                        tooltip: `${t('原生额度')}：${totalAmount}`,
+                        label: quotaSummary.primaryLabel,
+                        tooltip: quotaSummary.tooltip,
                       }
-                    : { label: totalLabel },
+                    : null,
+                  quotaSummary?.secondaryLabel
+                    ? { label: quotaSummary.secondaryLabel }
+                    : null,
                   limitLabel ? { label: limitLabel } : null,
                   upgradeLabel ? { label: upgradeLabel } : null,
                 ].filter(Boolean);

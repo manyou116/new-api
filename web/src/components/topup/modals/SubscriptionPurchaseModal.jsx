@@ -36,6 +36,7 @@ import { getCurrencyConfig } from '../../../helpers/render';
 import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
+  getSubscriptionQuotaSummary,
 } from '../../../helpers/subscriptionFormat';
 
 const { Text } = Typography;
@@ -74,6 +75,7 @@ const SubscriptionPurchaseModal = ({
   const purchaseCount = Number(purchaseLimitInfo?.count || 0);
   const purchaseLimitReached =
     purchaseLimit > 0 && purchaseCount >= purchaseLimit;
+  const quotaSummary = getSubscriptionQuotaSummary(plan, t, renderQuota);
 
   return (
     <Modal
@@ -129,23 +131,35 @@ const SubscriptionPurchaseModal = ({
               )}
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>
-                  {t('总额度')}：
+                  {quotaSummary?.primaryLabel?.includes(t('总额度'))
+                    ? t('总额度')
+                    : t('周期额度')}：
                 </Text>
                 <div className='flex items-center'>
                   <Package size={14} className='mr-1 text-slate-500' />
-                  {totalAmount > 0 ? (
-                    <Tooltip content={`${t('原生额度')}：${totalAmount}`}>
+                  {quotaSummary?.tooltip ? (
+                    <Tooltip content={quotaSummary.tooltip}>
                       <Text className='text-slate-900 dark:text-slate-100'>
-                        {renderQuota(totalAmount)}
+                        {quotaSummary.primaryLabel?.split(': ').slice(1).join(': ')}
                       </Text>
                     </Tooltip>
                   ) : (
                     <Text className='text-slate-900 dark:text-slate-100'>
-                      {t('不限')}
+                      {quotaSummary?.primaryLabel?.split(': ').slice(1).join(': ')}
                     </Text>
                   )}
                 </div>
               </div>
+              {quotaSummary?.secondaryLabel && (
+                <div className='flex justify-between items-center'>
+                  <Text strong className='text-slate-700 dark:text-slate-200'>
+                    {t('理论总权益')}：
+                  </Text>
+                  <Text className='text-slate-900 dark:text-slate-100'>
+                    {quotaSummary.secondaryLabel.split(': ').slice(1).join(': ')}
+                  </Text>
+                </div>
+              )}
               {plan?.upgrade_group ? (
                 <div className='flex justify-between items-center'>
                   <Text strong className='text-slate-700 dark:text-slate-200'>
