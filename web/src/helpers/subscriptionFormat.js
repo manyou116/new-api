@@ -49,6 +49,27 @@ function getResetSeconds(plan) {
   return 0;
 }
 
+export function formatSubscriptionAllowedGroups(plan, t) {
+  const groups = String(plan?.allowed_token_groups || '')
+    .split(',')
+    .map((group) => group.trim())
+    .filter(Boolean);
+  if (groups.length === 0) {
+    return {
+      hasRestriction: false,
+      label: `${t('可用分组')}: ${t('不限分组')}`,
+      value: t('不限分组'),
+      groups: [],
+    };
+  }
+  return {
+    hasRestriction: true,
+    label: `${t('可用分组')}: ${groups.join(', ')}`,
+    value: groups.join(', '),
+    groups,
+  };
+}
+
 export function getSubscriptionQuotaSummary(plan, t, renderQuota) {
   const totalAmount = Number(plan?.total_amount || 0);
   const resetPeriod = plan?.quota_reset_period || 'never';

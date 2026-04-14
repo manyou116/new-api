@@ -95,6 +95,7 @@ const AddEditSubscriptionModal = ({
     max_purchase_per_user: 0,
     total_amount: 0,
     upgrade_group: '',
+    allowed_token_groups: [],
     stripe_price_id: '',
     creem_product_id: '',
   });
@@ -121,6 +122,12 @@ const AddEditSubscriptionModal = ({
         quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
       ),
       upgrade_group: p.upgrade_group || '',
+      allowed_token_groups: p.allowed_token_groups
+        ? p.allowed_token_groups
+            .split(',')
+            .map((group) => group.trim())
+            .filter(Boolean)
+        : [],
       stripe_price_id: p.stripe_price_id || '',
       creem_product_id: p.creem_product_id || '',
     };
@@ -164,6 +171,9 @@ const AddEditSubscriptionModal = ({
           max_purchase_per_user: Number(values.max_purchase_per_user || 0),
           total_amount: displayAmountToQuota(values.total_amount),
           upgrade_group: values.upgrade_group || '',
+          allowed_token_groups: Array.isArray(values.allowed_token_groups)
+            ? values.allowed_token_groups.join(',')
+            : '',
         },
       };
       if (editingPlan?.plan?.id) {
@@ -334,6 +344,26 @@ const AddEditSubscriptionModal = ({
                         )}
                       >
                         <Select.Option value=''>{t('不升级')}</Select.Option>
+                        {(groupOptions || []).map((g) => (
+                          <Select.Option key={g} value={g}>
+                            {g}
+                          </Select.Option>
+                        ))}
+                      </Form.Select>
+                    </Col>
+
+                    <Col span={12}>
+                      <Form.Select
+                        field='allowed_token_groups'
+                        label={t('允许使用分组')}
+                        multiple
+                        showClear
+                        loading={groupLoading}
+                        placeholder={t('不限分组')}
+                        extraText={t(
+                          '为空表示任意分组都可使用订阅额度；设置后仅这些分组可使用。',
+                        )}
+                      >
                         {(groupOptions || []).map((g) => (
                           <Select.Option key={g} value={g}>
                             {g}

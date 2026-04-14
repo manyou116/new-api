@@ -64,6 +64,18 @@ function formatResetPeriod(plan, t) {
   return t('不重置');
 }
 
+function formatAllowedTokenGroups(plan, t) {
+  const raw = plan?.allowed_token_groups || '';
+  const groups = raw
+    .split(',')
+    .map((group) => group.trim())
+    .filter(Boolean);
+  if (groups.length === 0) {
+    return t('不限分组');
+  }
+  return groups.join(', ');
+}
+
 const renderPlanTitle = (text, record, t) => {
   const subtitle = record?.plan?.subtitle;
   const plan = record?.plan;
@@ -91,6 +103,8 @@ const renderPlanTitle = (text, record, t) => {
         )}
         <Text type='tertiary'>{t('升级分组')}</Text>
         <Text>{plan?.upgrade_group ? plan.upgrade_group : t('不升级')}</Text>
+        <Text type='tertiary'>{t('允许分组')}</Text>
+        <Text>{formatAllowedTokenGroups(plan, t)}</Text>
         <Text type='tertiary'>{t('购买上限')}</Text>
         <Text>
           {plan?.max_purchase_per_user > 0
@@ -190,6 +204,12 @@ const renderUpgradeGroup = (text, record, t) => {
       {group ? group : t('不升级')}
     </Text>
   );
+};
+
+const renderAllowedTokenGroups = (text, record, t) => {
+  const value = formatAllowedTokenGroups(record?.plan, t);
+  const isUnlimited = !record?.plan?.allowed_token_groups;
+  return <Text type={isUnlimited ? 'tertiary' : 'secondary'}>{value}</Text>;
 };
 
 const renderResetPeriod = (text, record, t) => {
@@ -344,6 +364,11 @@ export const getSubscriptionsColumns = ({
       title: t('升级分组'),
       width: 100,
       render: (text, record) => renderUpgradeGroup(text, record, t),
+    },
+    {
+      title: t('允许分组'),
+      width: 140,
+      render: (text, record) => renderAllowedTokenGroups(text, record, t),
     },
     {
       title: t('操作'),

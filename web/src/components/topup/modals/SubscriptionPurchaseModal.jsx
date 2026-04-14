@@ -34,6 +34,7 @@ import { IconCreditCard } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../helpers';
 import { getCurrencyConfig } from '../../../helpers/render';
 import {
+  formatSubscriptionAllowedGroups,
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
   getSubscriptionQuotaSummary,
@@ -76,6 +77,7 @@ const SubscriptionPurchaseModal = ({
   const purchaseLimitReached =
     purchaseLimit > 0 && purchaseCount >= purchaseLimit;
   const quotaSummary = getSubscriptionQuotaSummary(plan, t, renderQuota);
+  const allowedGroupsInfo = formatSubscriptionAllowedGroups(plan, t);
 
   return (
     <Modal
@@ -170,6 +172,18 @@ const SubscriptionPurchaseModal = ({
                   </Text>
                 </div>
               ) : null}
+              <div className='flex justify-between items-center'>
+                <Text strong className='text-slate-700 dark:text-slate-200'>
+                  {t('可用分组')}：
+                </Text>
+                <Typography.Text
+                  ellipsis={{ rows: 1, showTooltip: true }}
+                  className='text-slate-900 dark:text-slate-100'
+                  style={{ maxWidth: 200 }}
+                >
+                  {allowedGroupsInfo.value}
+                </Typography.Text>
+              </div>
               <Divider margin={8} />
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>
@@ -188,6 +202,17 @@ const SubscriptionPurchaseModal = ({
             <Banner
               type='warning'
               description={`${t('已达到购买上限')} (${purchaseCount}/${purchaseLimit})`}
+              className='!rounded-xl'
+              closeIcon={null}
+            />
+          )}
+
+          {allowedGroupsInfo.hasRestriction && (
+            <Banner
+              type='warning'
+              description={t(
+                '这是限制分组套餐，仅可在指定分组使用订阅额度；使用其他分组时不会按订阅余额抵扣。',
+              )}
               className='!rounded-xl'
               closeIcon={null}
             />

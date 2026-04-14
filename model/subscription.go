@@ -156,8 +156,9 @@ type SubscriptionPlan struct {
 	DurationValue int    `json:"duration_value" gorm:"type:int;not null;default:1"`
 	CustomSeconds int64  `json:"custom_seconds" gorm:"type:bigint;not null;default:0"`
 
-	Enabled   bool `json:"enabled" gorm:"default:true"`
-	SortOrder int  `json:"sort_order" gorm:"type:int;default:0"`
+	Enabled            bool   `json:"enabled" gorm:"default:true"`
+	SortOrder          int    `json:"sort_order" gorm:"type:int;default:0"`
+	AllowedTokenGroups string `json:"allowed_token_groups" gorm:"type:text"`
 
 	StripePriceId  string `json:"stripe_price_id" gorm:"type:varchar(128);default:''"`
 	CreemProductId string `json:"creem_product_id" gorm:"type:varchar(128);default:''"`
@@ -296,13 +297,69 @@ func calcPlanEndTime(start time.Time, plan *SubscriptionPlan) (int64, error) {
 	}
 }
 
+func parseAllowedTokenGroups(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	seen := make(map[string]struct{}, len(parts))
+	groups := make([]string, 0, len(parts))
+	for _, part := range parts {
+		group := strings.TrimSpace(part)
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		groups = append(groups, group)
+	}
+	return groups
+}
+
+func NormalizeAllowedTokenGroups(value string) string {
+	groups := parseAllowedTokenGroups(value)
+	if len(groups) == 0 {
+		return ""
+	}
+	return strings.Join(groups, ",")
+}
+
 func NormalizeResetPeriod(period string) string {
-	switch strings.TrimSpace(period) {
-	case SubscriptionResetDaily, SubscriptionResetWeekly, SubscriptionResetMonthly, SubscriptionResetCustom:
-		return strings.TrimSpace(period)
+	switch strings.ToLower(strings.TrimSpace(period)) {
+	case SubscriptionResetDaily:
+		return SubscriptionResetDaily
+	case SubscriptionResetWeekly:
+		return SubscriptionResetWeekly
+	case SubscriptionResetMonthly:
+		return SubscriptionResetMonthly
+	case SubscriptionResetCustom:
+		return SubscriptionResetCustom
 	default:
 		return SubscriptionResetNever
 	}
+}
+
+func isSubscriptionPlanGroupAllowed(plan *SubscriptionPlan, usingGroup string) bool {
+	if plan == nil {
+		return false
+	}
+	groups := parseAllowedTokenGroups(plan.AllowedTokenGroups)
+	if len(groups) == 0 {
+		return true
+	}
+	usingGroup = strings.TrimSpace(usingGroup)
+	if usingGroup == "" {
+		return false
+	}
+	for _, group := range groups {
+		if group == usingGroup {
+			return true
+		}
+	}
+	return false
 }
 
 func calcNextResetTime(base time.Time, plan *SubscriptionPlan, endUnix int64) int64 {
@@ -953,7 +1010,7 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 }
 
 // PreConsumeUserSubscription pre-consumes from any active subscription total quota.
-func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
+func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64, usingGroup string) (*SubscriptionPreConsumeResult, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
 	}
@@ -1007,6 +1064,9 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			}
 			if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
 				return err
+			}
+			if !isSubscriptionPlanGroupAllowed(plan, usingGroup) {
+				continue
 			}
 			usedBefore := sub.AmountUsed
 			if sub.AmountTotal > 0 {
