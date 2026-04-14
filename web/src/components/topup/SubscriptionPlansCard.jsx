@@ -35,6 +35,7 @@ import { getCurrencyConfig } from '../../helpers/render';
 import { RefreshCw, Sparkles } from 'lucide-react';
 import SubscriptionPurchaseModal from './modals/SubscriptionPurchaseModal';
 import {
+  formatSubscriptionAllowedGroups,
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
   getSubscriptionQuotaSummary,
@@ -229,7 +230,10 @@ const SubscriptionPlansCard = ({
     (plans || []).forEach((p) => {
       const plan = p?.plan;
       if (!plan?.id) return;
-      map.set(plan.id, plan.title || '');
+      map.set(plan.id, {
+        title: plan.title || '',
+        allowedTokenGroups: plan.allowed_token_groups || '',
+      });
     });
     return map;
   }, [plans]);
@@ -390,10 +394,12 @@ const SubscriptionPlansCard = ({
                       totalAmount > 0
                         ? Math.max(0, totalAmount - usedAmount)
                         : 0;
-                    const planTitle =
-                      planInfo?.plan_title ||
-                      planTitleMap.get(subscription?.plan_id) ||
-                      '';
+                    const planMeta = planTitleMap.get(subscription?.plan_id) || {};
+                    const planTitle = planInfo?.plan_title || planMeta.title || '';
+                    const allowedGroupsInfo = formatSubscriptionAllowedGroups(
+                      { allowed_token_groups: planMeta.allowedTokenGroups },
+                      t,
+                    );
                     const remainDays = getRemainingDays(sub);
                     const usagePercent = getUsagePercent(sub);
                     const now = Date.now() / 1000;
@@ -471,6 +477,16 @@ const SubscriptionPlansCard = ({
                             </span>
                           )}
                         </div>
+                        {allowedGroupsInfo.hasRestriction && (
+                          <div className='text-xs text-gray-500 mb-2 flex items-center gap-2 flex-wrap'>
+                            <Tag color='orange' size='small' shape='circle'>
+                              {t('限制分组')}
+                            </Tag>
+                            <span>
+                              {t('仅限分组')}: {allowedGroupsInfo.value}
+                            </span>
+                          </div>
+                        )}
                         {!isLast && <Divider margin={12} />}
                       </div>
                     );
@@ -507,6 +523,10 @@ const SubscriptionPlansCard = ({
                 const upgradeLabel = plan?.upgrade_group
                   ? `${t('升级分组')}: ${plan.upgrade_group}`
                   : null;
+                const allowedGroupsInfo = formatSubscriptionAllowedGroups(plan, t);
+                const allowedGroupsLabel = allowedGroupsInfo.hasRestriction
+                  ? `${t('仅限分组')}: ${allowedGroupsInfo.value}`
+                  : null;
                 const resetLabel =
                   formatSubscriptionResetPeriod(plan, t) === t('不重置')
                     ? null
@@ -525,6 +545,7 @@ const SubscriptionPlansCard = ({
                   quotaSummary?.secondaryLabel
                     ? { label: quotaSummary.secondaryLabel }
                     : null,
+                  allowedGroupsLabel ? { label: allowedGroupsLabel } : null,
                   limitLabel ? { label: limitLabel } : null,
                   upgradeLabel ? { label: upgradeLabel } : null,
                 ].filter(Boolean);
@@ -539,14 +560,19 @@ const SubscriptionPlansCard = ({
                   >
                     <div className='p-4 h-full flex flex-col'>
                       {/* 推荐标签 */}
-                      {isPopular && (
-                        <div className='mb-2'>
+                      <div className='mb-2 flex items-center gap-2 flex-wrap'>
+                        {isPopular && (
                           <Tag color='purple' shape='circle' size='small'>
                             <Sparkles size={10} className='mr-1' />
                             {t('推荐')}
                           </Tag>
-                        </div>
-                      )}
+                        )}
+                        {allowedGroupsInfo.hasRestriction && (
+                          <Tag color='orange' shape='circle' size='small'>
+                            {t('限制分组套餐')}
+                          </Tag>
+                        )}
+                      </div>
                       {/* 套餐名称 */}
                       <div className='mb-3'>
                         <Typography.Title
