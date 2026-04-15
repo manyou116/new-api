@@ -24,6 +24,7 @@ import {
   Card,
   Descriptions,
   Modal,
+  Select,
   Spin,
   Tag,
   Typography,
@@ -33,10 +34,18 @@ import {
   renderNumber,
   renderQuota,
   showError,
+  showSuccess,
   timestamp2string,
 } from '../../../../helpers';
 
 const { Text, Paragraph } = Typography;
+
+const BILLING_PREFERENCE_OPTIONS = [
+  { value: 'subscription_first', labelKey: '优先订阅' },
+  { value: 'wallet_first', labelKey: '优先钱包' },
+  { value: 'subscription_only', labelKey: '仅用订阅' },
+  { value: 'wallet_only', labelKey: '仅用钱包' },
+];
 
 const getUserStatusMeta = (user, t) => {
   if (!user) {
@@ -88,10 +97,13 @@ const ReviewSection = ({ title, children, extra = null }) => (
 const UserReviewModal = ({ visible, onCancel, user, t }) => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [reviewSummary, setReviewSummary] = useState(null);
+  const [billingPreference, setBillingPreference] = useState('subscription_first');
+  const [savingBillingPreference, setSavingBillingPreference] = useState(false);
 
   useEffect(() => {
     if (!visible) {
       setReviewSummary(null);
+      setBillingPreference('subscription_first');
     }
   }, [visible]);
 
@@ -112,7 +124,9 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
           return;
         }
         if (!disposed) {
-          setReviewSummary(data || null);
+          const summary = data || null;
+          setReviewSummary(summary);
+          setBillingPreference(summary?.billing_preference || 'subscription_first');
         }
       } catch (error) {
         if (!disposed) {
@@ -140,6 +154,38 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
     : [];
   const security = reviewSummary?.security || {};
   const usage = reviewSummary?.usage || {};
+
+  const handleSaveBillingPreference = async () => {
+    if (!reviewUser?.id) {
+      return;
+    }
+    setSavingBillingPreference(true);
+    try {
+      const res = await API.put(`/api/user/${reviewUser.id}/billing-preference`, {
+        billing_preference: billingPreference,
+      });
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('保存扣费优先级失败'));
+        return;
+      }
+      const nextPreference = data?.billing_preference || billingPreference;
+      setBillingPreference(nextPreference);
+      setReviewSummary((prev) =>
+        prev
+          ? {
+              ...prev,
+              billing_preference: nextPreference,
+            }
+          : prev,
+      );
+      showSuccess(t('保存成功'));
+    } catch (error) {
+      showError(t('保存扣费优先级失败'));
+    } finally {
+      setSavingBillingPreference(false);
+    }
+  };
 
   const bindingRows = useMemo(() => {
     const rows = Array.isArray(reviewSummary?.bindings) ? reviewSummary.bindings : [];
@@ -201,6 +247,15 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
     {
       key: t('当前订阅计划'),
       value: reviewSummary?.subscription_plan || '-',
+    },
+    {
+      key: t('扣费优先级'),
+      value: BILLING_PREFERENCE_OPTIONS.find((item) => item.value === billingPreference)
+        ? t(
+            BILLING_PREFERENCE_OPTIONS.find((item) => item.value === billingPreference)
+              .labelKey,
+          )
+        : billingPreference,
     },
     {
       key: t('邀请收益'),
@@ -306,7 +361,30 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
               ) : null}
             </ReviewSection>
 
-            <ReviewSection title={t('商业信息')}>
+            <ReviewSection
+              title={t('商业信息')}
+              extra={
+                <div className='flex items-center gap-2'>
+                  <Select
+                    size='small'
+                    value={billingPreference}
+                    onChange={setBillingPreference}
+                    optionList={BILLING_PREFERENCE_OPTIONS.map((item) => ({
+                      value: item.value,
+                      label: t(item.labelKey),
+                    }))}
+                  />
+                  <Button
+                    size='small'
+                    type='primary'
+                    loading={savingBillingPreference}
+                    onClick={handleSaveBillingPreference}
+                  >
+                    {t('保存')}
+                  </Button>
+                </div>
+              }
+            >
               <Descriptions data={commercialRows} column={1} />
               {subscriptions.length > 0 ? (
                 <div className='mt-3 flex flex-wrap gap-2'>

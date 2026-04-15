@@ -291,6 +291,10 @@ func GetAllUsers(c *gin.Context) {
 	return
 }
 
+type AdminBillingPreferenceRequest struct {
+	BillingPreference string `json:"billing_preference"`
+}
+
 func SearchUsers(c *gin.Context) {
 	filters := buildUserSearchFilters(c)
 	pageInfo := common.GetPageQuery(c)
@@ -352,6 +356,37 @@ func GetUserReview(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, review)
+}
+
+func UpdateUserBillingPreference(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var req AdminBillingPreferenceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	user, err := model.GetUserById(id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	myRole := c.GetInt("role")
+	if myRole <= user.Role && myRole != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+	current := user.GetSetting()
+	current.BillingPreference = common.NormalizeBillingPreference(req.BillingPreference)
+	user.SetSetting(current)
+	if err := user.Update(false); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"billing_preference": current.BillingPreference})
 }
 
 func GetUser(c *gin.Context) {
