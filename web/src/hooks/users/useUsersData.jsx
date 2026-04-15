@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Modal } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
@@ -35,6 +36,7 @@ export const useUsersData = () => {
   const [searching, setSearching] = useState(false);
   const [groupOptions, setGroupOptions] = useState([]);
   const [userCount, setUserCount] = useState(0);
+  const [selectedUsers, setSelectedUsers] = useState([]);
 
   // Modal states
   const [showAddUser, setShowAddUser] = useState(false);
@@ -69,12 +71,24 @@ export const useUsersData = () => {
     setUsers(users);
   };
 
+  const clearSelection = () => {
+    setSelectedUsers([]);
+  };
+
+  const rowSelection = {
+    selectedRowKeys: selectedUsers.map((user) => user.id),
+    onChange: (_, selectedRows) => {
+      setSelectedUsers(selectedRows);
+    },
+  };
+
   // Load users data
   const loadUsers = async (startIdx, pageSize) => {
     setLoading(true);
     const res = await API.get(`/api/user/?p=${startIdx}&page_size=${pageSize}`);
     const { success, message, data } = res.data;
     if (success) {
+      clearSelection();
       const newPageData = data.items;
       setActivePage(data.page);
       setUserCount(data.total);
@@ -110,6 +124,7 @@ export const useUsersData = () => {
     );
     const { success, message, data } = res.data;
     if (success) {
+      clearSelection();
       const newPageData = data.items;
       setActivePage(data.page);
       setUserCount(data.total);
@@ -133,6 +148,7 @@ export const useUsersData = () => {
     const { success, message } = res.data;
     if (success) {
       showSuccess(t('操作成功完成！'));
+      clearSelection();
       const user = res.data.data;
 
       // Create a new array and new object to ensure React detects changes
@@ -188,8 +204,72 @@ export const useUsersData = () => {
     }
   };
 
+  const batchDisableUsers = async () => {
+    const ids = selectedUsers.map((user) => user.id).filter(Boolean);
+    if (ids.length === 0) {
+      return;
+    }
+
+    Modal.confirm({
+      title: t('确认批量禁用'),
+      content: t('确认禁用所选用户？若包含不可操作用户，系统会自动跳过。'),
+      okType: 'danger',
+      onOk: async () => {
+        setLoading(true);
+        try {
+          const res = await API.post('/api/user/manage_batch', {
+            ids,
+            action: 'disable',
+          });
+          const { success, message, data } = res.data;
+          if (!success) {
+            showError(message || t('操作失败，请重试'));
+            return;
+          }
+
+          const updatedIds = Array.isArray(data?.updated_ids) ? data.updated_ids : [];
+          const skippedIds = Array.isArray(data?.skipped_ids) ? data.skipped_ids : [];
+
+          if (updatedIds.length > 0) {
+            setUsers((prevUsers) =>
+              prevUsers.map((user) =>
+                updatedIds.includes(user.id)
+                  ? { ...user, status: 2 }
+                  : user,
+              ),
+            );
+          }
+
+          clearSelection();
+
+          if (updatedIds.length > 0 && skippedIds.length > 0) {
+            showSuccess(
+              t('批量禁用完成，已禁用 {{count}} 个用户，跳过 {{skipped}} 个用户。', {
+                count: updatedIds.length,
+                skipped: skippedIds.length,
+              }),
+            );
+          } else if (updatedIds.length > 0) {
+            showSuccess(
+              t('批量禁用完成，已禁用 {{count}} 个用户。', {
+                count: updatedIds.length,
+              }),
+            );
+          } else {
+            showError(t('没有可禁用的用户'));
+          }
+        } catch (error) {
+          showError(t('操作失败，请重试'));
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+  };
+
   // Handle page change
   const handlePageChange = (page) => {
+    clearSelection();
     setActivePage(page);
     const { searchKeyword, searchGroup } = getFormValues();
     if (searchKeyword === '' && searchGroup === '') {
@@ -201,6 +281,7 @@ export const useUsersData = () => {
 
   // Handle page size change
   const handlePageSizeChange = async (size) => {
+    clearSelection();
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
@@ -226,6 +307,7 @@ export const useUsersData = () => {
 
   // Refresh data
   const refresh = async (page = activePage) => {
+    clearSelection();
     const { searchKeyword, searchGroup } = getFormValues();
     if (searchKeyword === '' && searchGroup === '') {
       await loadUsers(page, pageSize);
@@ -283,6 +365,8 @@ export const useUsersData = () => {
     userCount,
     searching,
     groupOptions,
+    selectedUsers,
+    rowSelection,
 
     // Modal state
     showAddUser,
@@ -307,6 +391,8 @@ export const useUsersData = () => {
     manageUser,
     resetUserPasskey,
     resetUserTwoFA,
+    batchDisableUsers,
+    clearSelection,
     handlePageChange,
     handlePageSizeChange,
     handleRow,

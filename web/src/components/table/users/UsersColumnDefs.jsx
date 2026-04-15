@@ -29,7 +29,12 @@ import {
   Dropdown,
 } from '@douyinfe/semi-ui';
 import { IconMore } from '@douyinfe/semi-icons';
-import { renderGroup, renderNumber, renderQuota } from '../../../helpers';
+import {
+  renderGroup,
+  renderNumber,
+  renderQuota,
+  timestamp2string,
+} from '../../../helpers';
 
 /**
  * Render user role
@@ -170,6 +175,14 @@ const renderQuotaUsage = (text, record, t) => {
   );
 };
 
+const renderTimestamp = (timestamp, t) => {
+  const value = Number(timestamp || 0);
+  if (value <= 0) {
+    return <span className='text-semi-color-text-2'>{t('未记录')}</span>;
+  }
+  return timestamp2string(value);
+};
+
 /**
  * Render invite information
  */
@@ -209,6 +222,7 @@ const renderOperations = (
     showResetPasskeyModal,
     showResetTwoFAModal,
     showUserSubscriptionsModal,
+    showUserReviewModal,
     t,
   },
 ) => {
@@ -248,6 +262,9 @@ const renderOperations = (
 
   return (
     <Space>
+      <Button size='small' type='primary' theme='solid' onClick={() => showUserReviewModal(record)}>
+        {t('审阅')}
+      </Button>
       {record.status === 1 ? (
         <Button
           type='danger'
@@ -309,6 +326,7 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserSubscriptionsModal,
+  showUserReviewModal,
 }) => {
   return [
     {
@@ -346,6 +364,16 @@ export const getUsersColumns = ({
       },
     },
     {
+      title: t('注册时间'),
+      dataIndex: 'created_at',
+      render: (text) => renderTimestamp(text, t),
+    },
+    {
+      title: t('最近请求'),
+      dataIndex: 'last_request_at',
+      render: (text) => renderTimestamp(text, t),
+    },
+    {
       title: t('邀请信息'),
       dataIndex: 'invite',
       render: (text, record, index) => renderInviteInfo(text, record, t),
@@ -366,6 +394,7 @@ export const getUsersColumns = ({
           showResetPasskeyModal,
           showResetTwoFAModal,
           showUserSubscriptionsModal,
+          showUserReviewModal,
           t,
         }),
     },

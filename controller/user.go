@@ -87,6 +87,9 @@ func Login(c *gin.Context) {
 
 // setup session & cookies and then return user info
 func setupLogin(user *model.User, c *gin.Context) {
+	if err := model.UpdateUserLastLoginAt(user.Id, common.GetTimestamp()); err != nil {
+		common.SysLog("failed to update user last login time: " + err.Error())
+	}
 	session := sessions.Default(c)
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
@@ -880,6 +883,57 @@ type ManageRequest struct {
 	Action string `json:"action"`
 }
 
+type ManageBatchRequest struct {
+	Ids    []int  `json:"ids"`
+	Action string `json:"action"`
+}
+
+func loadManageTargetUser(userId int) (*model.User, error) {
+	user := &model.User{Id: userId}
+	if err := model.DB.Unscoped().Where(user).First(user).Error; err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func validateManageUserAction(myRole int, user *model.User, action string) error {
+	if user == nil || user.Id == 0 {
+		return errors.New(i18n.MsgUserNotExists)
+	}
+	if myRole <= user.Role && myRole != common.RoleRootUser {
+		return errors.New(i18n.MsgUserNoPermissionHigherLevel)
+	}
+	switch action {
+	case "disable":
+		if user.Role == common.RoleRootUser {
+			return errors.New(i18n.MsgUserCannotDisableRootUser)
+		}
+	case "enable":
+		return nil
+	case "delete":
+		if user.Role == common.RoleRootUser {
+			return errors.New(i18n.MsgUserCannotDeleteRootUser)
+		}
+	case "promote":
+		if myRole != common.RoleRootUser {
+			return errors.New(i18n.MsgUserAdminCannotPromote)
+		}
+		if user.Role >= common.RoleAdminUser {
+			return errors.New(i18n.MsgUserAlreadyAdmin)
+		}
+	case "demote":
+		if user.Role == common.RoleRootUser {
+			return errors.New(i18n.MsgUserCannotDemoteRootUser)
+		}
+		if user.Role == common.RoleCommonUser {
+			return errors.New(i18n.MsgUserAlreadyCommon)
+		}
+	default:
+		return errors.New("invalid action")
+	}
+	return nil
+}
+
 // ManageUser Only admin user can do this
 func ManageUser(c *gin.Context) {
 	var req ManageRequest
@@ -889,34 +943,49 @@ func ManageUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	user := model.User{
-		Id: req.Id,
-	}
-	// Fill attributes
-	model.DB.Unscoped().Where(&user).First(&user)
-	if user.Id == 0 {
+	user, err := loadManageTargetUser(req.Id)
+	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserNotExists)
 		return
 	}
 	myRole := c.GetInt("role")
-	if myRole <= user.Role && myRole != common.RoleRootUser {
-		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+	if err := validateManageUserAction(myRole, user, req.Action); err != nil {
+		switch req.Action {
+		case "disable":
+			if user.Role == common.RoleRootUser {
+				common.ApiErrorI18n(c, i18n.MsgUserCannotDisableRootUser)
+			} else {
+				common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+			}
+		case "delete":
+			if user.Role == common.RoleRootUser {
+				common.ApiErrorI18n(c, i18n.MsgUserCannotDeleteRootUser)
+			} else {
+				common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+			}
+		case "promote":
+			if myRole != common.RoleRootUser {
+				common.ApiErrorI18n(c, i18n.MsgUserAdminCannotPromote)
+			} else {
+				common.ApiErrorI18n(c, i18n.MsgUserAlreadyAdmin)
+			}
+		case "demote":
+			if user.Role == common.RoleRootUser {
+				common.ApiErrorI18n(c, i18n.MsgUserCannotDemoteRootUser)
+			} else {
+				common.ApiErrorI18n(c, i18n.MsgUserAlreadyCommon)
+			}
+		default:
+			common.ApiError(c, err)
+		}
 		return
 	}
 	switch req.Action {
 	case "disable":
 		user.Status = common.UserStatusDisabled
-		if user.Role == common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserCannotDisableRootUser)
-			return
-		}
 	case "enable":
 		user.Status = common.UserStatusEnabled
 	case "delete":
-		if user.Role == common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserCannotDeleteRootUser)
-			return
-		}
 		if err := user.Delete(); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -925,24 +994,8 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 	case "promote":
-		if myRole != common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserAdminCannotPromote)
-			return
-		}
-		if user.Role >= common.RoleAdminUser {
-			common.ApiErrorI18n(c, i18n.MsgUserAlreadyAdmin)
-			return
-		}
 		user.Role = common.RoleAdminUser
 	case "demote":
-		if user.Role == common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserCannotDemoteRootUser)
-			return
-		}
-		if user.Role == common.RoleCommonUser {
-			common.ApiErrorI18n(c, i18n.MsgUserAlreadyCommon)
-			return
-		}
 		user.Role = common.RoleCommonUser
 	}
 
@@ -960,6 +1013,57 @@ func ManageUser(c *gin.Context) {
 		"data":    clearUser,
 	})
 	return
+}
+
+func ManageUserBatch(c *gin.Context) {
+	var req ManageBatchRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if req.Action != "disable" || len(req.Ids) == 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	myRole := c.GetInt("role")
+	uniqueIds := make(map[int]struct{}, len(req.Ids))
+	updatedIds := make([]int, 0, len(req.Ids))
+	skippedIds := make([]int, 0)
+
+	for _, id := range req.Ids {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := uniqueIds[id]; exists {
+			continue
+		}
+		uniqueIds[id] = struct{}{}
+
+		user, err := loadManageTargetUser(id)
+		if err != nil {
+			skippedIds = append(skippedIds, id)
+			continue
+		}
+		if err := validateManageUserAction(myRole, user, req.Action); err != nil {
+			skippedIds = append(skippedIds, id)
+			continue
+		}
+		updatedIds = append(updatedIds, id)
+	}
+
+	if len(updatedIds) > 0 {
+		if err := model.UpdateUserStatusByIds(updatedIds, common.UserStatusDisabled); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"updated_ids": updatedIds,
+		"skipped_ids": skippedIds,
+		"count":       len(updatedIds),
+	})
 }
 
 type emailBindRequest struct {

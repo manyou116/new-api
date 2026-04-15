@@ -1,0 +1,5 @@
+factory.pub {
+    tls internal
+    # 反向代理前端 Vite 开发服务器
+    reverse_proxy localhost:3000
+}

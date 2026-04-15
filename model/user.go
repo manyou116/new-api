@@ -39,6 +39,9 @@ type User struct {
 	Quota            int            `json:"quota" gorm:"type:int;default:0"`
 	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	CreatedAt        int64          `json:"created_at" gorm:"bigint;default:0;column:created_at"`
+	LastLoginAt      int64          `json:"last_login_at" gorm:"bigint;default:0;column:last_login_at"`
+	LastRequestAt    int64          `json:"last_request_at" gorm:"bigint;default:0;column:last_request_at"`
 	Group            string         `json:"group" gorm:"type:varchar(64);default:'default'"`
 	AffCode          string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount         int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
@@ -387,6 +390,7 @@ func (user *User) Insert(inviterId int) error {
 		}
 	}
 	user.Quota = common.QuotaForNewUser
+	user.CreatedAt = common.GetTimestamp()
 	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
 
@@ -446,6 +450,7 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 		}
 	}
 	user.Quota = common.QuotaForNewUser
+	user.CreatedAt = common.GetTimestamp()
 	user.AffCode = common.GetRandomString(4)
 
 	// 初始化用户设置
@@ -945,10 +950,38 @@ func GetRootUser() (user *User) {
 	return user
 }
 
+func UpdateUserLastLoginAt(id int, timestamp int64) error {
+	if id <= 0 || timestamp <= 0 {
+		return nil
+	}
+	err := DB.Model(&User{}).Where("id = ?", id).Update("last_login_at", timestamp).Error
+	if err != nil {
+		return err
+	}
+	return invalidateUserCache(id)
+}
+
+func UpdateUserStatusByIds(ids []int, status int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	err := DB.Model(&User{}).Where("id IN ?", ids).Update("status", status).Error
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := invalidateUserCache(id); err != nil {
+			common.SysLog("failed to invalidate user cache: " + err.Error())
+		}
+	}
+	return nil
+}
+
 func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
 		addNewRecord(BatchUpdateTypeRequestCount, id, 1)
+		addNewRecord(BatchUpdateTypeLastRequestAt, id, int(common.GetTimestamp()))
 		return
 	}
 	updateUserUsedQuotaAndRequestCount(id, quota, 1)
@@ -957,8 +990,9 @@ func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
-			"used_quota":    gorm.Expr("used_quota + ?", quota),
-			"request_count": gorm.Expr("request_count + ?", count),
+			"used_quota":      gorm.Expr("used_quota + ?", quota),
+			"request_count":   gorm.Expr("request_count + ?", count),
+			"last_request_at": common.GetTimestamp(),
 		},
 	).Error
 	if err != nil {
@@ -987,6 +1021,13 @@ func updateUserRequestCount(id int, count int) {
 	err := DB.Model(&User{}).Where("id = ?", id).Update("request_count", gorm.Expr("request_count + ?", count)).Error
 	if err != nil {
 		common.SysLog("failed to update user request count: " + err.Error())
+	}
+}
+
+func updateUserLastRequestAt(id int, timestamp int64) {
+	err := DB.Model(&User{}).Where("id = ?", id).Update("last_request_at", timestamp).Error
+	if err != nil {
+		common.SysLog("failed to update user last request time: " + err.Error())
 	}
 }
 

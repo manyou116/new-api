@@ -275,25 +275,29 @@ func calcPlanEndTime(start time.Time, plan *SubscriptionPlan) (int64, error) {
 	if plan == nil {
 		return 0, errors.New("plan is nil")
 	}
-	if plan.DurationValue <= 0 && plan.DurationUnit != SubscriptionDurationCustom {
+	return calcDurationEndTime(start, plan.DurationUnit, plan.DurationValue, plan.CustomSeconds)
+}
+
+func calcDurationEndTime(start time.Time, durationUnit string, durationValue int, customSeconds int64) (int64, error) {
+	if durationValue <= 0 && durationUnit != SubscriptionDurationCustom {
 		return 0, errors.New("duration_value must be > 0")
 	}
-	switch plan.DurationUnit {
+	switch durationUnit {
 	case SubscriptionDurationYear:
-		return start.AddDate(plan.DurationValue, 0, 0).Unix(), nil
+		return start.AddDate(durationValue, 0, 0).Unix(), nil
 	case SubscriptionDurationMonth:
-		return start.AddDate(0, plan.DurationValue, 0).Unix(), nil
+		return start.AddDate(0, durationValue, 0).Unix(), nil
 	case SubscriptionDurationDay:
-		return start.Add(time.Duration(plan.DurationValue) * 24 * time.Hour).Unix(), nil
+		return start.Add(time.Duration(durationValue) * 24 * time.Hour).Unix(), nil
 	case SubscriptionDurationHour:
-		return start.Add(time.Duration(plan.DurationValue) * time.Hour).Unix(), nil
+		return start.Add(time.Duration(durationValue) * time.Hour).Unix(), nil
 	case SubscriptionDurationCustom:
-		if plan.CustomSeconds <= 0 {
+		if customSeconds <= 0 {
 			return 0, errors.New("custom_seconds must be > 0")
 		}
-		return start.Add(time.Duration(plan.CustomSeconds) * time.Second).Unix(), nil
+		return start.Add(time.Duration(customSeconds) * time.Second).Unix(), nil
 	default:
-		return 0, fmt.Errorf("invalid duration_unit: %s", plan.DurationUnit)
+		return 0, fmt.Errorf("invalid duration_unit: %s", durationUnit)
 	}
 }
 
@@ -766,6 +770,62 @@ func buildSubscriptionSummaries(subs []UserSubscription) []SubscriptionSummary {
 		})
 	}
 	return result
+}
+
+// AdminInvalidateUserSubscription marks a user subscription as cancelled and ends it immediately.
+func AdminExtendUserSubscription(userSubscriptionId int, durationUnit string, durationValue int, customSeconds int64) (string, error) {
+	if userSubscriptionId <= 0 {
+		return "", errors.New("invalid userSubscriptionId")
+	}
+	now := common.GetTimestamp()
+	returnMsg := ""
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var sub UserSubscription
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
+			return err
+		}
+		if sub.Status == "cancelled" {
+			return errors.New("已作废订阅不支持直接加时，请新建订阅")
+		}
+
+		baseUnix := sub.EndTime
+		if sub.Status != "active" || sub.EndTime <= now {
+			baseUnix = now
+			returnMsg = "订阅已过期，本次加时已从当前时间开始续期"
+		}
+		baseTime := time.Unix(baseUnix, 0)
+		nextEndTime, err := calcDurationEndTime(baseTime, durationUnit, durationValue, customSeconds)
+		if err != nil {
+			return err
+		}
+
+		updates := map[string]interface{}{
+			"end_time":   nextEndTime,
+			"status":     "active",
+			"updated_at": common.GetTimestamp(),
+		}
+
+		if sub.PlanId > 0 {
+			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+			if err == nil && plan != nil {
+				baseReset := time.Unix(now, 0)
+				if sub.LastResetTime > 0 {
+					baseReset = time.Unix(sub.LastResetTime, 0)
+				} else if sub.StartTime > 0 {
+					baseReset = time.Unix(sub.StartTime, 0)
+				}
+				nextReset := calcNextResetTime(baseReset, plan, nextEndTime)
+				updates["next_reset_time"] = nextReset
+			}
+		}
+
+		return tx.Model(&sub).Updates(updates).Error
+	})
+	if err != nil {
+		return "", err
+	}
+	return returnMsg, nil
 }
 
 // AdminInvalidateUserSubscription marks a user subscription as cancelled and ends it immediately.
