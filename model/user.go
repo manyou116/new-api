@@ -597,7 +597,7 @@ func GetAdminDashboardOverview() (*AdminDashboardOverview, error) {
 
 func getAdminRankingQuery() *gorm.DB {
 	return DB.Model(&User{}).
-		Select("id, username, display_name, `group`, request_count, used_quota, last_request_at").
+		Select("id, username, display_name, "+commonGroupCol+", request_count, used_quota, last_request_at").
 		Where("deleted_at IS NULL")
 }
 
