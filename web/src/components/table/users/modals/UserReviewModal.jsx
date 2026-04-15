@@ -142,18 +142,9 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
   const usage = reviewSummary?.usage || {};
 
   const bindingRows = useMemo(() => {
-    const rows = [
-      { key: t('邮箱'), value: reviewUser?.email || '' },
-      { key: t('GitHub'), value: reviewUser?.github_id || '' },
-      { key: t('微信'), value: reviewUser?.wechat_id || '' },
-      { key: t('Telegram'), value: reviewUser?.telegram_id || '' },
-      { key: t('OIDC'), value: reviewUser?.oidc_id || '' },
-      { key: t('Discord'), value: reviewUser?.discord_id || '' },
-      { key: t('Linux DO'), value: reviewUser?.linux_do_id || '' },
-      { key: t('妖火'), value: reviewUser?.yaohuo_id || '' },
-    ];
-    return rows.filter((item) => item.value);
-  }, [reviewUser, t]);
+    const rows = Array.isArray(reviewSummary?.bindings) ? reviewSummary.bindings : [];
+    return rows.filter((item) => item?.value);
+  }, [reviewSummary?.bindings]);
 
   const overviewRows = [
     {
@@ -340,7 +331,10 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
                 <div className='mt-3 flex flex-wrap gap-2'>
                   {bindingRows.map((item) => (
                     <Tag key={item.key} color='white' shape='circle'>
-                      {item.key}: {item.value}
+                      {item.label}: {item.value}
+                      {item.is_custom && item.provider_id
+                        ? ` (${t('自定义 OAuth')} #${item.provider_id})`
+                        : ''}
                     </Tag>
                   ))}
                 </div>

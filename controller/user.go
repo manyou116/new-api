@@ -306,6 +306,25 @@ func SearchUsers(c *gin.Context) {
 	return
 }
 
+func GetAdminDashboardOverview(c *gin.Context) {
+	overview, err := model.GetAdminDashboardOverview()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, overview)
+}
+
+func GetAdminUserRankings(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	rankings, err := model.GetAdminUserRankings(limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rankings)
+}
+
 func GetUserSummary(c *gin.Context) {
 	filters := buildUserSearchFilters(c)
 	summary, err := model.GetUserSummary(filters)

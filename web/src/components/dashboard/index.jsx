@@ -29,6 +29,7 @@ import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
 import FaqPanel from './FaqPanel';
 import UptimePanel from './UptimePanel';
+import AdminRankingsPanel from './AdminRankingsPanel';
 import SearchModal from './modals/SearchModal';
 
 import { useDashboardData } from '../../hooks/dashboard/useDashboardData';
@@ -83,6 +84,8 @@ const Dashboard = () => {
     dashboardData.performanceMetrics,
     dashboardData.navigate,
     dashboardData.t,
+    dashboardData.isAdminUser,
+    dashboardData.adminOverview,
   );
 
   // ========== 数据处理 ==========
@@ -169,6 +172,14 @@ const Dashboard = () => {
         CARD_PROPS={CARD_PROPS}
         CHART_CONFIG={CHART_CONFIG}
       />
+
+      {dashboardData.isAdminUser && (
+        <AdminRankingsPanel
+          rankings={dashboardData.adminRankings}
+          loading={dashboardData.loading}
+          t={dashboardData.t}
+        />
+      )}
 
       {/* API信息和图表面板 */}
       <div className='mb-4'>

@@ -78,6 +78,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== Uptime 数据 ==========
   const [uptimeData, setUptimeData] = useState([]);
+  const [adminOverview, setAdminOverview] = useState(null);
+  const [adminRankings, setAdminRankings] = useState(null);
   const [uptimeLoading, setUptimeLoading] = useState(false);
   const [activeUptimeTab, setActiveUptimeTab] = useState('');
 
@@ -240,6 +242,34 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     [refresh],
   );
 
+  const loadAdminDashboardData = useCallback(async () => {
+    if (!isAdminUser) {
+      setAdminOverview(null);
+      setAdminRankings(null);
+      return;
+    }
+    try {
+      const [overviewRes, rankingsRes] = await Promise.all([
+        API.get('/api/user/dashboard/overview'),
+        API.get('/api/user/dashboard/rankings?limit=10'),
+      ]);
+      const overviewPayload = overviewRes?.data;
+      if (overviewPayload?.success) {
+        setAdminOverview(overviewPayload.data || null);
+      } else if (overviewPayload?.message) {
+        showError(overviewPayload.message);
+      }
+      const rankingsPayload = rankingsRes?.data;
+      if (rankingsPayload?.success) {
+        setAdminRankings(rankingsPayload.data || null);
+      } else if (rankingsPayload?.message) {
+        showError(rankingsPayload.message);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }, [isAdminUser]);
+
   // ========== Effects ==========
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -254,6 +284,10 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       initialized.current = true;
     }
   }, [getUserData]);
+
+  useEffect(() => {
+    loadAdminDashboardData();
+  }, [loadAdminDashboardData]);
 
   return {
     // 基础状态
@@ -290,6 +324,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
     // Uptime 数据
     uptimeData,
+    adminOverview,
+    adminRankings,
     uptimeLoading,
     activeUptimeTab,
     setActiveUptimeTab,

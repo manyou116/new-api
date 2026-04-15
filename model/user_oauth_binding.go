@@ -7,6 +7,11 @@ import (
 	"gorm.io/gorm"
 )
 
+type UserOAuthBindingReviewItem struct {
+	ProviderId     int    `json:"provider_id"`
+	ProviderUserId string `json:"provider_user_id"`
+}
+
 // UserOAuthBinding stores the binding relationship between users and custom OAuth providers
 type UserOAuthBinding struct {
 	Id             int       `json:"id" gorm:"primaryKey"`
@@ -137,6 +142,32 @@ func DeleteUserOAuthBinding(userId, providerId int) error {
 // DeleteUserOAuthBindingsByUserId deletes all OAuth bindings for a user
 func DeleteUserOAuthBindingsByUserId(userId int) error {
 	return DB.Where("user_id = ?", userId).Delete(&UserOAuthBinding{}).Error
+}
+
+// GetBindingCountByUserId returns the number of custom OAuth bindings for a user
+func GetBindingCountByUserId(userId int) (int64, error) {
+	var count int64
+	err := DB.Model(&UserOAuthBinding{}).Where("user_id = ?", userId).Count(&count).Error
+	return count, err
+}
+
+// GetUserOAuthBindingReviewItemsByUserId returns custom OAuth bindings for admin review
+func GetUserOAuthBindingReviewItemsByUserId(userId int) ([]UserOAuthBindingReviewItem, error) {
+	bindings, err := GetUserOAuthBindingsByUserId(userId)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]UserOAuthBindingReviewItem, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		items = append(items, UserOAuthBindingReviewItem{
+			ProviderId:     binding.ProviderId,
+			ProviderUserId: binding.ProviderUserId,
+		})
+	}
+	return items, nil
 }
 
 // GetBindingCountByProviderId returns the number of bindings for a provider

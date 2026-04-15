@@ -222,19 +222,60 @@ type UserSummary struct {
 	RecentlyActiveCount int64 `json:"recently_active_count"`
 }
 
+type UserBindingSummaryItem struct {
+	Key            string `json:"key"`
+	Label          string `json:"label"`
+	Value          string `json:"value"`
+	BindingType    string `json:"binding_type"`
+	ProviderId     *int   `json:"provider_id,omitempty"`
+	IsCustom       bool   `json:"is_custom"`
+}
+
 type UserReviewSummary struct {
-	User               *User                  `json:"user"`
-	Subscriptions      []SubscriptionSummary  `json:"subscriptions"`
-	Usage              map[string]interface{} `json:"usage"`
-	Security           map[string]interface{} `json:"security"`
-	HasSubscription    bool                   `json:"has_subscription"`
-	SubscriptionPlan   string                 `json:"subscription_plan"`
-	HasTwoFA           bool                   `json:"has_two_fa"`
-	HasPasskey         bool                   `json:"has_passkey"`
-	BindingCount       int                    `json:"binding_count"`
-	IsRecentlyActive   bool                   `json:"is_recently_active"`
-	LastActivityAt     int64                  `json:"last_activity_at"`
-	RecentlyActiveDays int                    `json:"recently_active_days"`
+	User               *User                   `json:"user"`
+	Subscriptions      []SubscriptionSummary   `json:"subscriptions"`
+	Usage              map[string]interface{}  `json:"usage"`
+	Security           map[string]interface{}  `json:"security"`
+	Bindings           []UserBindingSummaryItem `json:"bindings"`
+	HasSubscription    bool                    `json:"has_subscription"`
+	SubscriptionPlan   string                  `json:"subscription_plan"`
+	HasTwoFA           bool                    `json:"has_two_fa"`
+	HasPasskey         bool                    `json:"has_passkey"`
+	BindingCount       int                     `json:"binding_count"`
+	IsRecentlyActive   bool                    `json:"is_recently_active"`
+	LastActivityAt     int64                   `json:"last_activity_at"`
+	RecentlyActiveDays int                     `json:"recently_active_days"`
+}
+
+type AdminDashboardOverview struct {
+	TotalUsers          int64 `json:"total_users"`
+	EnabledUsers        int64 `json:"enabled_users"`
+	DisabledUsers       int64 `json:"disabled_users"`
+	DeletedUsers        int64 `json:"deleted_users"`
+	AdminUsers          int64 `json:"admin_users"`
+	TotalQuota          int64 `json:"total_quota"`
+	TotalUsedQuota      int64 `json:"total_used_quota"`
+	TotalRequestCount   int64 `json:"total_request_count"`
+	ActiveUsers24h      int64 `json:"active_users_24h"`
+	ActiveUsers7d       int64 `json:"active_users_7d"`
+	NewUsers24h         int64 `json:"new_users_24h"`
+	NewUsers7d          int64 `json:"new_users_7d"`
+}
+
+type AdminUserRankingItem struct {
+	Id            int    `json:"id"`
+	Username      string `json:"username"`
+	DisplayName   string `json:"display_name"`
+	Group         string `json:"group"`
+	RequestCount  int    `json:"request_count"`
+	UsedQuota     int    `json:"used_quota"`
+	LastRequestAt int64  `json:"last_request_at"`
+}
+
+type AdminUserRankings struct {
+	ByRequestCount []AdminUserRankingItem `json:"by_request_count"`
+	ByUsedQuota    []AdminUserRankingItem `json:"by_used_quota"`
+	ByLastRequest  []AdminUserRankingItem `json:"by_last_request"`
 }
 
 func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err error) {
@@ -367,7 +408,7 @@ func enrichUsersForAdmin(users []*User, recentDays int) {
 	}
 }
 
-func countUserBindings(user *User) int {
+func countBuiltInBindings(user *User) int {
 	if user == nil {
 		return 0
 	}
@@ -388,6 +429,62 @@ func countUserBindings(user *User) int {
 		}
 	}
 	return count
+}
+
+func countUserBindings(user *User) int {
+	if user == nil {
+		return 0
+	}
+	count := countBuiltInBindings(user)
+	customCount, err := GetBindingCountByUserId(user.Id)
+	if err != nil {
+		return count
+	}
+	return count + int(customCount)
+}
+
+func buildUserBindingSummaryItems(user *User) []UserBindingSummaryItem {
+	if user == nil {
+		return nil
+	}
+	items := make([]UserBindingSummaryItem, 0, 12)
+	appendIfValue := func(key string, label string, value string, bindingType string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		items = append(items, UserBindingSummaryItem{
+			Key:         key,
+			Label:       label,
+			Value:       value,
+			BindingType: bindingType,
+			IsCustom:    false,
+		})
+	}
+	appendIfValue("email", "邮箱", user.Email, "email")
+	appendIfValue("github", "GitHub", user.GitHubId, "github")
+	appendIfValue("wechat", "微信", user.WeChatId, "wechat")
+	appendIfValue("telegram", "Telegram", user.TelegramId, "telegram")
+	appendIfValue("oidc", "OIDC", user.OidcId, "oidc")
+	appendIfValue("discord", "Discord", user.DiscordId, "discord")
+	appendIfValue("linux_do", "Linux DO", user.LinuxDOId, "linux_do")
+	appendIfValue("yaohuo", "妖火", user.YaohuoId, "yaohuo")
+
+	customBindings, err := GetUserOAuthBindingReviewItemsByUserId(user.Id)
+	if err == nil {
+		for _, binding := range customBindings {
+			providerId := binding.ProviderId
+			items = append(items, UserBindingSummaryItem{
+				Key:         fmt.Sprintf("custom_oauth_%d", binding.ProviderId),
+				Label:       fmt.Sprintf("OAuth #%d", binding.ProviderId),
+				Value:       binding.ProviderUserId,
+				BindingType: "custom_oauth",
+				ProviderId:  &providerId,
+				IsCustom:    true,
+			})
+		}
+	}
+	return items
 }
 
 func SearchUsers(filters UserSearchFilters, startIdx int, num int) ([]*User, int64, error) {
@@ -451,6 +548,78 @@ func GetUserSummary(filters UserSearchFilters) (*UserSummary, error) {
 	return summary, nil
 }
 
+func GetAdminDashboardOverview() (*AdminDashboardOverview, error) {
+	now := common.GetTimestamp()
+	overview := &AdminDashboardOverview{}
+	baseQuery := func() *gorm.DB {
+		return DB.Model(&User{}).Where("deleted_at IS NULL")
+	}
+
+	if err := baseQuery().Count(&overview.TotalUsers).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Where("status = ?", common.UserStatusEnabled).Count(&overview.EnabledUsers).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Where("status = ?", common.UserStatusDisabled).Count(&overview.DisabledUsers).Error; err != nil {
+		return nil, err
+	}
+	if err := DB.Unscoped().Model(&User{}).Where("deleted_at IS NOT NULL").Count(&overview.DeletedUsers).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Where("role >= ?", common.RoleAdminUser).Count(&overview.AdminUsers).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Select("COALESCE(SUM(quota), 0)").Scan(&overview.TotalQuota).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Select("COALESCE(SUM(used_quota), 0)").Scan(&overview.TotalUsedQuota).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Select("COALESCE(SUM(request_count), 0)").Scan(&overview.TotalRequestCount).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Where("last_request_at >= ?", now-86400).Count(&overview.ActiveUsers24h).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Where("last_request_at >= ?", now-7*86400).Count(&overview.ActiveUsers7d).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Where("created_at >= ?", now-86400).Count(&overview.NewUsers24h).Error; err != nil {
+		return nil, err
+	}
+	if err := baseQuery().Where("created_at >= ?", now-7*86400).Count(&overview.NewUsers7d).Error; err != nil {
+		return nil, err
+	}
+	return overview, nil
+}
+
+func getAdminRankingQuery() *gorm.DB {
+	return DB.Model(&User{}).
+		Select("id, username, display_name, `group`, request_count, used_quota, last_request_at").
+		Where("deleted_at IS NULL")
+}
+
+func GetAdminUserRankings(limit int) (*AdminUserRankings, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 20 {
+		limit = 20
+	}
+	result := &AdminUserRankings{}
+	if err := getAdminRankingQuery().Where("request_count > 0").Order("request_count DESC, id DESC").Limit(limit).Scan(&result.ByRequestCount).Error; err != nil {
+		return nil, err
+	}
+	if err := getAdminRankingQuery().Where("used_quota > 0").Order("used_quota DESC, id DESC").Limit(limit).Scan(&result.ByUsedQuota).Error; err != nil {
+		return nil, err
+	}
+	if err := getAdminRankingQuery().Where("last_request_at > 0").Order("last_request_at DESC, id DESC").Limit(limit).Scan(&result.ByLastRequest).Error; err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func GetUserReviewSummary(userId int) (*UserReviewSummary, error) {
 	user, err := GetUserById(userId, false)
 	if err != nil {
@@ -468,6 +637,17 @@ func GetUserReviewSummary(userId int) (*UserReviewSummary, error) {
 	review := &UserReviewSummary{
 		User:               user,
 		Subscriptions:      subscriptions,
+		Usage: map[string]interface{}{
+			"request_count":   user.RequestCount,
+			"used_quota":      user.UsedQuota,
+			"last_request_at": user.LastRequestAt,
+		},
+		Security: map[string]interface{}{
+			"has_2fa":       user.HasTwoFA,
+			"has_passkey":   user.HasPasskey,
+			"binding_count": user.BindingCount,
+		},
+		Bindings:           buildUserBindingSummaryItems(user),
 		HasSubscription:    user.HasSubscription,
 		SubscriptionPlan:   user.SubscriptionPlan,
 		HasTwoFA:           user.HasTwoFA,
@@ -476,16 +656,6 @@ func GetUserReviewSummary(userId int) (*UserReviewSummary, error) {
 		IsRecentlyActive:   user.IsRecentlyActive,
 		LastActivityAt:     lastActivityAt,
 		RecentlyActiveDays: 7,
-		Usage: map[string]interface{}{
-			"request_count": user.RequestCount,
-			"used_quota":    user.UsedQuota,
-			"last_request_at": user.LastRequestAt,
-		},
-		Security: map[string]interface{}{
-			"has_2fa":       user.HasTwoFA,
-			"has_passkey":   user.HasPasskey,
-			"binding_count": user.BindingCount,
-		},
 	}
 	return review, nil
 }
