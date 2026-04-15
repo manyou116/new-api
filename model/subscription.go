@@ -565,6 +565,24 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	return sub, nil
 }
 
+func updateUserBillingPreferenceToSubscriptionFirst(userId int) error {
+	if userId <= 0 {
+		return errors.New("invalid userId")
+	}
+	user, err := GetUserById(userId, true)
+	if err != nil {
+		return err
+	}
+	current := user.GetSetting()
+	normalized := common.NormalizeBillingPreference(current.BillingPreference)
+	if normalized == "subscription_first" || normalized == "subscription_only" {
+		return nil
+	}
+	current.BillingPreference = "subscription_first"
+	user.SetSetting(current)
+	return user.Update(false)
+}
+
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
 func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	if tradeNo == "" {
@@ -624,6 +642,11 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	}
 	if upgradeGroup != "" && logUserId > 0 {
 		_ = UpdateUserGroupCache(logUserId, upgradeGroup)
+	}
+	if logUserId > 0 {
+		if err := updateUserBillingPreferenceToSubscriptionFirst(logUserId); err != nil {
+			common.SysLog("failed to update user billing preference after subscription purchase: " + err.Error())
+		}
 	}
 	if logUserId > 0 {
 		msg := fmt.Sprintf("订阅购买成功，套餐: %s，支付金额: %.2f，支付方式: %s", logPlanTitle, logMoney, logPaymentMethod)
@@ -703,6 +726,9 @@ func AdminBindSubscription(userId int, planId int, sourceNote string) (string, e
 	})
 	if err != nil {
 		return "", err
+	}
+	if err := updateUserBillingPreferenceToSubscriptionFirst(userId); err != nil {
+		common.SysLog("failed to update user billing preference after admin bind subscription: " + err.Error())
 	}
 	if strings.TrimSpace(plan.UpgradeGroup) != "" {
 		_ = UpdateUserGroupCache(userId, plan.UpgradeGroup)

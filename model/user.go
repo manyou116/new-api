@@ -232,19 +232,20 @@ type UserBindingSummaryItem struct {
 }
 
 type UserReviewSummary struct {
-	User               *User                   `json:"user"`
-	Subscriptions      []SubscriptionSummary   `json:"subscriptions"`
-	Usage              map[string]interface{}  `json:"usage"`
-	Security           map[string]interface{}  `json:"security"`
-	Bindings           []UserBindingSummaryItem `json:"bindings"`
-	HasSubscription    bool                    `json:"has_subscription"`
-	SubscriptionPlan   string                  `json:"subscription_plan"`
-	HasTwoFA           bool                    `json:"has_two_fa"`
-	HasPasskey         bool                    `json:"has_passkey"`
-	BindingCount       int                     `json:"binding_count"`
-	IsRecentlyActive   bool                    `json:"is_recently_active"`
-	LastActivityAt     int64                   `json:"last_activity_at"`
-	RecentlyActiveDays int                     `json:"recently_active_days"`
+	User                *User                    `json:"user"`
+	Subscriptions       []SubscriptionSummary    `json:"subscriptions"`
+	Usage               map[string]interface{}   `json:"usage"`
+	Security            map[string]interface{}   `json:"security"`
+	Bindings            []UserBindingSummaryItem `json:"bindings"`
+	HasSubscription     bool                     `json:"has_subscription"`
+	SubscriptionPlan    string                   `json:"subscription_plan"`
+	BillingPreference   string                   `json:"billing_preference"`
+	HasTwoFA            bool                     `json:"has_two_fa"`
+	HasPasskey          bool                     `json:"has_passkey"`
+	BindingCount        int                      `json:"binding_count"`
+	IsRecentlyActive    bool                     `json:"is_recently_active"`
+	LastActivityAt      int64                    `json:"last_activity_at"`
+	RecentlyActiveDays  int                      `json:"recently_active_days"`
 }
 
 type AdminDashboardOverview struct {
@@ -634,9 +635,10 @@ func GetUserReviewSummary(userId int) (*UserReviewSummary, error) {
 	if lastActivityAt <= 0 {
 		lastActivityAt = user.LastLoginAt
 	}
+	settingMap := user.GetSetting()
 	review := &UserReviewSummary{
-		User:               user,
-		Subscriptions:      subscriptions,
+		User:              user,
+		Subscriptions:     subscriptions,
 		Usage: map[string]interface{}{
 			"request_count":   user.RequestCount,
 			"used_quota":      user.UsedQuota,
@@ -650,6 +652,7 @@ func GetUserReviewSummary(userId int) (*UserReviewSummary, error) {
 		Bindings:           buildUserBindingSummaryItems(user),
 		HasSubscription:    user.HasSubscription,
 		SubscriptionPlan:   user.SubscriptionPlan,
+		BillingPreference:  common.NormalizeBillingPreference(settingMap.BillingPreference),
 		HasTwoFA:           user.HasTwoFA,
 		HasPasskey:         user.HasPasskey,
 		BindingCount:       user.BindingCount,
