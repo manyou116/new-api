@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Empty,
+  InputNumber,
   Modal,
   Select,
   SideSheet,
@@ -73,11 +74,27 @@ function renderStatusTag(sub, t) {
   );
 }
 
+const EXTEND_DURATION_OPTIONS = [
+  { label: '小时', value: 'hour' },
+  { label: '天', value: 'day' },
+  { label: '月', value: 'month' },
+  { label: '年', value: 'year' },
+  { label: '自定义秒数', value: 'custom' },
+];
+
 const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [plansLoading, setPlansLoading] = useState(false);
+  const [extendModalVisible, setExtendModalVisible] = useState(false);
+  const [extending, setExtending] = useState(false);
+  const [extendingSub, setExtendingSub] = useState(null);
+  const [extendForm, setExtendForm] = useState({
+    durationUnit: 'month',
+    durationValue: 1,
+    customSeconds: 3600,
+  });
 
   const [plans, setPlans] = useState([]);
   const [selectedPlanId, setSelectedPlanId] = useState(null);
@@ -159,6 +176,79 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
 
   const handlePageChange = (page) => {
     setCurrentPage(page);
+  };
+
+  const resetExtendForm = () => {
+    setExtendForm({
+      durationUnit: 'month',
+      durationValue: 1,
+      customSeconds: 3600,
+    });
+    setExtendingSub(null);
+  };
+
+  const openExtendModal = (sub) => {
+    if (!sub || sub?.status === 'cancelled') {
+      return;
+    }
+    resetExtendForm();
+    setExtendingSub(sub);
+    setExtendModalVisible(true);
+  };
+
+  const closeExtendModal = () => {
+    if (extending) {
+      return;
+    }
+    setExtendModalVisible(false);
+    resetExtendForm();
+  };
+
+  const submitExtendSubscription = async () => {
+    if (!extendingSub?.id) {
+      showError(t('订阅信息缺失'));
+      return;
+    }
+    if (extendForm.durationUnit !== 'custom' && Number(extendForm.durationValue || 0) <= 0) {
+      showError(t('请输入大于 0 的时长值'));
+      return;
+    }
+    if (extendForm.durationUnit === 'custom' && Number(extendForm.customSeconds || 0) <= 0) {
+      showError(t('请输入大于 0 的秒数'));
+      return;
+    }
+
+    setExtending(true);
+    try {
+      const res = await API.post(
+        `/api/subscription/admin/user_subscriptions/${extendingSub.id}/extend`,
+        {
+          duration_unit: extendForm.durationUnit,
+          duration_value:
+            extendForm.durationUnit === 'custom'
+              ? 0
+              : Number(extendForm.durationValue || 0),
+          custom_seconds:
+            extendForm.durationUnit === 'custom'
+              ? Number(extendForm.customSeconds || 0)
+              : 0,
+        },
+      );
+      if (res.data?.success) {
+        const msg = res.data?.data?.message;
+        showSuccess(msg ? msg : t('加时成功'));
+        setExtendModalVisible(false);
+        resetExtendForm();
+        await loadUserSubscriptions();
+        onSuccess?.();
+      } else {
+        showError(res.data?.message || t('加时失败'));
+      }
+    } catch (e) {
+      showError(t('请求失败'));
+    } finally {
+      setExtending(false);
+    }
   };
 
   const createSubscription = async () => {
@@ -344,6 +434,15 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
             <Space>
               <Button
                 size='small'
+                theme='light'
+                disabled={isCancelled}
+                style={isCancelled ? { pointerEvents: 'none', opacity: 0.5 } : undefined}
+                onClick={() => openExtendModal(sub)}
+              >
+                {t('加时')}
+              </Button>
+              <Button
+                size='small'
                 type='warning'
                 theme='light'
                 disabled={!isActive || isCancelled}
@@ -388,6 +487,67 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
       }
     >
       <div className='p-4'>
+        <Modal
+          visible={extendModalVisible}
+          title={t('订阅加时')}
+          onCancel={closeExtendModal}
+          onOk={submitExtendSubscription}
+          confirmLoading={extending}
+          centered
+        >
+          <div className='space-y-4'>
+            <div className='text-sm text-gray-600'>
+              <div>
+                {t('当前结束时间')}: {formatTs(extendingSub?.end_time)}
+              </div>
+              <div>
+                {t('已过期订阅会从当前时间续期，已作废订阅不支持加时。')}
+              </div>
+            </div>
+            <Select
+              value={extendForm.durationUnit}
+              optionList={EXTEND_DURATION_OPTIONS.map((item) => ({
+                ...item,
+                label: t(item.label),
+              }))}
+              onChange={(value) =>
+                setExtendForm((prev) => ({
+                  ...prev,
+                  durationUnit: value,
+                }))
+              }
+              style={{ width: '100%' }}
+            />
+            {extendForm.durationUnit === 'custom' ? (
+              <InputNumber
+                min={1}
+                value={extendForm.customSeconds}
+                onChange={(value) =>
+                  setExtendForm((prev) => ({
+                    ...prev,
+                    customSeconds: Number(value || 0),
+                  }))
+                }
+                style={{ width: '100%' }}
+                placeholder={t('输入秒数')}
+              />
+            ) : (
+              <InputNumber
+                min={1}
+                value={extendForm.durationValue}
+                onChange={(value) =>
+                  setExtendForm((prev) => ({
+                    ...prev,
+                    durationValue: Number(value || 0),
+                  }))
+                }
+                style={{ width: '100%' }}
+                placeholder={t('输入时长')}
+              />
+            )}
+          </div>
+        </Modal>
+
         {/* 顶部操作栏：新增订阅 */}
         <div className='flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4'>
           <div className='flex gap-2 flex-1'>

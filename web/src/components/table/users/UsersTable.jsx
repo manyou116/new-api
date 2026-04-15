@@ -32,6 +32,7 @@ import DeleteUserModal from './modals/DeleteUserModal';
 import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
+import UserReviewModal from './modals/UserReviewModal';
 
 const UsersTable = (usersData) => {
   const {
@@ -50,6 +51,7 @@ const UsersTable = (usersData) => {
     refresh,
     resetUserPasskey,
     resetUserTwoFA,
+    rowSelection,
     t,
   } = usersData;
 
@@ -64,6 +66,7 @@ const UsersTable = (usersData) => {
   const [showResetTwoFAModal, setShowResetTwoFAModal] = useState(false);
   const [showUserSubscriptionsModal, setShowUserSubscriptionsModal] =
     useState(false);
+  const [showUserReviewModal, setShowUserReviewModal] = useState(false);
 
   // Modal handlers
   const showPromoteUserModal = (user) => {
@@ -100,6 +103,11 @@ const UsersTable = (usersData) => {
   const showUserSubscriptionsUserModal = (user) => {
     setModalUser(user);
     setShowUserSubscriptionsModal(true);
+  };
+
+  const showUserReviewUserModal = (user) => {
+    setModalUser(user);
+    setShowUserReviewModal(true);
   };
 
   // Modal confirm handlers
@@ -141,6 +149,7 @@ const UsersTable = (usersData) => {
       showResetPasskeyModal: showResetPasskeyUserModal,
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserSubscriptionsModal: showUserSubscriptionsUserModal,
+      showUserReviewModal: showUserReviewUserModal,
     });
   }, [
     t,
@@ -153,6 +162,7 @@ const UsersTable = (usersData) => {
     showResetPasskeyUserModal,
     showResetTwoFAUserModal,
     showUserSubscriptionsUserModal,
+    showUserReviewUserModal,
   ]);
 
   // Handle compact mode by removing fixed positioning
@@ -173,6 +183,7 @@ const UsersTable = (usersData) => {
       <CardTable
         columns={tableColumns}
         dataSource={users}
+        rowSelection={rowSelection}
         scroll={compactMode ? undefined : { x: 'max-content' }}
         pagination={{
           currentPage: activePage,
@@ -259,6 +270,13 @@ const UsersTable = (usersData) => {
         user={modalUser}
         t={t}
         onSuccess={() => refresh?.()}
+      />
+
+      <UserReviewModal
+        visible={showUserReviewModal}
+        onCancel={() => setShowUserReviewModal(false)}
+        user={modalUser}
+        t={t}
       />
     </>
   );

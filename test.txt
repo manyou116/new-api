@@ -1,0 +1,26 @@
+=== new-api 项目测试文件 ===
+
+项目简介：
+new-api 是一个 AI API 网关/代理，支持 40+ 个上游 AI 提供商
+
+技术栈：
+- 后端：Go 1.22+, Gin 框架, GORM v2 ORM
+- 前端：React 18, Vite, Semi Design UI
+- 数据库：SQLite, MySQL, PostgreSQL
+- 缓存：Redis
+
+项目结构：
+/router      - HTTP 路由
+/controller  - 请求处理
+/service     - 业务逻辑
+/model       - 数据模型
+/relay       - AI API 代理
+/middleware  - 中间件
+/web         - React 前端
+
+测试用例：
+✓ 测试 1：基础功能检查
+✓ 测试 2：数据库兼容性
+✓ 测试 3：国际化支持
+
+文件更新时间：2026-04-14T05:39:21.832Z

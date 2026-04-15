@@ -20,7 +20,13 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Button } from '@douyinfe/semi-ui';
 
-const UsersActions = ({ setShowAddUser, t }) => {
+const UsersActions = ({
+  setShowAddUser,
+  selectedUsers,
+  batchDisableUsers,
+  loading,
+  t,
+}) => {
   // Add new user
   const handleAddUser = () => {
     setShowAddUser(true);
@@ -30,6 +36,15 @@ const UsersActions = ({ setShowAddUser, t }) => {
     <div className='flex gap-2 w-full md:w-auto order-2 md:order-1'>
       <Button className='w-full md:w-auto' onClick={handleAddUser} size='small'>
         {t('添加用户')}
+      </Button>
+      <Button
+        className='w-full md:w-auto'
+        type='danger'
+        size='small'
+        disabled={loading || selectedUsers.length === 0}
+        onClick={batchDisableUsers}
+      >
+        {t('禁用所选用户')}
       </Button>
     </div>
   );

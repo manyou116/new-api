@@ -348,6 +348,12 @@ type AdminCreateUserSubscriptionRequest struct {
 	PlanId int `json:"plan_id"`
 }
 
+type AdminExtendUserSubscriptionRequest struct {
+	DurationUnit  string `json:"duration_unit"`
+	DurationValue int    `json:"duration_value"`
+	CustomSeconds int64  `json:"custom_seconds"`
+}
+
 // AdminCreateUserSubscription creates a new user subscription from a plan (no payment).
 func AdminCreateUserSubscription(c *gin.Context) {
 	userId, _ := strconv.Atoi(c.Param("id"))
@@ -361,6 +367,30 @@ func AdminCreateUserSubscription(c *gin.Context) {
 		return
 	}
 	msg, err := model.AdminBindSubscription(userId, req.PlanId, "")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if msg != "" {
+		common.ApiSuccess(c, gin.H{"message": msg})
+		return
+	}
+	common.ApiSuccess(c, nil)
+}
+
+// AdminExtendUserSubscription extends an existing user subscription.
+func AdminExtendUserSubscription(c *gin.Context) {
+	subId, _ := strconv.Atoi(c.Param("id"))
+	if subId <= 0 {
+		common.ApiErrorMsg(c, "无效的订阅ID")
+		return
+	}
+	var req AdminExtendUserSubscriptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	msg, err := model.AdminExtendUserSubscription(subId, req.DurationUnit, req.DurationValue, req.CustomSeconds)
 	if err != nil {
 		common.ApiError(c, err)
 		return
