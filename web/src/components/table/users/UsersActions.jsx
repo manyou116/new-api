@@ -19,11 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Button } from '@douyinfe/semi-ui';
+import { IconSetting } from '@douyinfe/semi-icons';
 
 const UsersActions = ({
   setShowAddUser,
   selectedUsers,
   batchDisableUsers,
+  batchEnableUsers,
+  setShowColumnSelector,
   loading,
   t,
 }) => {
@@ -33,9 +36,17 @@ const UsersActions = ({
   };
 
   return (
-    <div className='flex gap-2 w-full md:w-auto order-2 md:order-1'>
+    <div className='flex gap-2 w-full md:w-auto order-2 md:order-1 flex-wrap'>
       <Button className='w-full md:w-auto' onClick={handleAddUser} size='small'>
         {t('添加用户')}
+      </Button>
+      <Button
+        className='w-full md:w-auto'
+        size='small'
+        disabled={loading || selectedUsers.length === 0}
+        onClick={batchEnableUsers}
+      >
+        {t('启用所选用户')}
       </Button>
       <Button
         className='w-full md:w-auto'
@@ -45,6 +56,15 @@ const UsersActions = ({
         onClick={batchDisableUsers}
       >
         {t('禁用所选用户')}
+      </Button>
+      <Button
+        className='w-full md:w-auto'
+        type='tertiary'
+        size='small'
+        icon={<IconSetting />}
+        onClick={() => setShowColumnSelector(true)}
+      >
+        {t('列设置')}
       </Button>
     </div>
   );

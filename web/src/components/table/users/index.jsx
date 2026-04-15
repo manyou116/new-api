@@ -25,6 +25,9 @@ import UsersFilters from './UsersFilters';
 import UsersDescription from './UsersDescription';
 import AddUserModal from './modals/AddUserModal';
 import EditUserModal from './modals/EditUserModal';
+import UsersTabs from './UsersTabs';
+import UsersStatsCards from './UsersStatsCards';
+import ColumnSelectorModal from './modals/ColumnSelectorModal';
 import { useUsersData } from '../../../hooks/users/useUsersData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
@@ -57,6 +60,17 @@ const UsersPage = () => {
     // Description state
     compactMode,
     setCompactMode,
+    summaryLoading,
+    activeTabKey,
+    tabCounts,
+    handleTabChange,
+    showColumnSelector,
+    setShowColumnSelector,
+    visibleColumns,
+    handleColumnVisibilityChange,
+    handleSelectAllColumns,
+    initDefaultColumns,
+    USER_COLUMN_KEYS,
 
     // Translation
     t,
@@ -77,8 +91,26 @@ const UsersPage = () => {
         editingUser={editingUser}
       />
 
+      <ColumnSelectorModal
+        showColumnSelector={showColumnSelector}
+        setShowColumnSelector={setShowColumnSelector}
+        visibleColumns={visibleColumns}
+        handleColumnVisibilityChange={handleColumnVisibilityChange}
+        handleSelectAllColumns={handleSelectAllColumns}
+        initDefaultColumns={initDefaultColumns}
+        USER_COLUMN_KEYS={USER_COLUMN_KEYS}
+        t={t}
+      />
+
       <CardPro
-        type='type1'
+        type='type3'
+        statsArea={
+          <UsersStatsCards
+            summary={usersData.globalSummary}
+            loading={summaryLoading}
+            t={t}
+          />
+        }
         descriptionArea={
           <UsersDescription
             compactMode={compactMode}
@@ -86,29 +118,37 @@ const UsersPage = () => {
             t={t}
           />
         }
+        tabsArea={
+          <UsersTabs
+            activeTabKey={activeTabKey}
+            handleTabChange={handleTabChange}
+            tabCounts={tabCounts}
+            t={t}
+          />
+        }
         actionsArea={
-          <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
-            <UsersActions
-              setShowAddUser={setShowAddUser}
-              selectedUsers={usersData.selectedUsers}
-              batchDisableUsers={usersData.batchDisableUsers}
-              loading={usersData.loading}
-              t={t}
-            />
-
-            <UsersFilters
-              formInitValues={formInitValues}
-              setFormApi={setFormApi}
-              searchUsers={searchUsers}
-              loadUsers={loadUsers}
-              activePage={activePage}
-              pageSize={pageSize}
-              groupOptions={groupOptions}
-              loading={loading}
-              searching={searching}
-              t={t}
-            />
-          </div>
+          <UsersActions
+            setShowAddUser={setShowAddUser}
+            selectedUsers={usersData.selectedUsers}
+            batchDisableUsers={usersData.batchDisableUsers}
+            batchEnableUsers={usersData.batchEnableUsers}
+            setShowColumnSelector={setShowColumnSelector}
+            loading={usersData.loading}
+            t={t}
+          />
+        }
+        searchArea={
+          <UsersFilters
+            formInitValues={formInitValues}
+            setFormApi={setFormApi}
+            searchUsers={usersData.searchCurrentUsers}
+            loadUsers={usersData.loadCurrentUsers}
+            pageSize={pageSize}
+            groupOptions={groupOptions}
+            loading={loading}
+            searching={searching}
+            t={t}
+          />
         }
         paginationArea={createCardProPagination({
           currentPage: usersData.activePage,

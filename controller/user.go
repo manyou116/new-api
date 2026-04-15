@@ -231,9 +231,54 @@ func Register(c *gin.Context) {
 	return
 }
 
+func buildUserSearchFilters(c *gin.Context) model.UserSearchFilters {
+	filters := model.UserSearchFilters{
+		Keyword:     strings.TrimSpace(c.Query("keyword")),
+		Group:       strings.TrimSpace(c.Query("group")),
+		QuotaHealth: strings.TrimSpace(c.Query("quota_health")),
+	}
+	if includeDeletedStr := strings.TrimSpace(c.Query("include_deleted")); includeDeletedStr != "" {
+		if includeDeleted, err := strconv.ParseBool(includeDeletedStr); err == nil {
+			filters.IncludeDeleted = includeDeleted
+		}
+	}
+	if deletedOnlyStr := strings.TrimSpace(c.Query("deleted_only")); deletedOnlyStr != "" {
+		if deletedOnly, err := strconv.ParseBool(deletedOnlyStr); err == nil {
+			filters.DeletedOnly = deletedOnly
+		}
+	}
+	if roleStr := strings.TrimSpace(c.Query("role")); roleStr != "" {
+		if role, err := strconv.Atoi(roleStr); err == nil {
+			filters.Role = &role
+		}
+	}
+	if minRoleStr := strings.TrimSpace(c.Query("min_role")); minRoleStr != "" {
+		if minRole, err := strconv.Atoi(minRoleStr); err == nil {
+			filters.MinRole = &minRole
+		}
+	}
+	if statusStr := strings.TrimSpace(c.Query("status")); statusStr != "" {
+		if status, err := strconv.Atoi(statusStr); err == nil {
+			filters.Status = &status
+		}
+	}
+	if subStr := strings.TrimSpace(c.Query("has_subscription")); subStr != "" {
+		if hasSubscription, err := strconv.ParseBool(subStr); err == nil {
+			filters.HasSubscription = &hasSubscription
+		}
+	}
+	if daysStr := strings.TrimSpace(c.Query("active_within_days")); daysStr != "" {
+		if days, err := strconv.Atoi(daysStr); err == nil && days > 0 {
+			filters.ActiveWithinDays = &days
+		}
+	}
+	return filters
+}
+
 func GetAllUsers(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.GetAllUsers(pageInfo)
+	filters := buildUserSearchFilters(c)
+	users, total, err := model.SearchUsers(filters, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -247,10 +292,9 @@ func GetAllUsers(c *gin.Context) {
 }
 
 func SearchUsers(c *gin.Context) {
-	keyword := c.Query("keyword")
-	group := c.Query("group")
+	filters := buildUserSearchFilters(c)
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.SearchUsers(keyword, group, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	users, total, err := model.SearchUsers(filters, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -260,6 +304,35 @@ func SearchUsers(c *gin.Context) {
 	pageInfo.SetItems(users)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+func GetUserSummary(c *gin.Context) {
+	filters := buildUserSearchFilters(c)
+	summary, err := model.GetUserSummary(filters)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, summary)
+}
+
+func GetUserReview(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	review, err := model.GetUserReviewSummary(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	myRole := c.GetInt("role")
+	if myRole <= review.User.Role && myRole != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+	common.ApiSuccess(c, review)
 }
 
 func GetUser(c *gin.Context) {
@@ -1021,7 +1094,7 @@ func ManageUserBatch(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	if req.Action != "disable" || len(req.Ids) == 0 {
+	if (req.Action != "disable" && req.Action != "enable") || len(req.Ids) == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
@@ -1053,7 +1126,11 @@ func ManageUserBatch(c *gin.Context) {
 	}
 
 	if len(updatedIds) > 0 {
-		if err := model.UpdateUserStatusByIds(updatedIds, common.UserStatusDisabled); err != nil {
+		status := common.UserStatusDisabled
+		if req.Action == "enable" {
+			status = common.UserStatusEnabled
+		}
+		if err := model.UpdateUserStatusByIds(updatedIds, status); err != nil {
 			common.ApiError(c, err)
 			return
 		}

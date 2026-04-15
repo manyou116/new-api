@@ -21,12 +21,39 @@ import React, { useRef } from 'react';
 import { Form, Button } from '@douyinfe/semi-ui';
 import { IconSearch } from '@douyinfe/semi-icons';
 
+const ROLE_OPTIONS = [
+  { value: 1, labelKey: '普通用户' },
+  { value: 10, labelKey: '管理员' },
+  { value: 100, labelKey: '超级管理员' },
+];
+
+const STATUS_OPTIONS = [
+  { value: 1, labelKey: '已启用' },
+  { value: 2, labelKey: '已禁用' },
+];
+
+const SUBSCRIPTION_OPTIONS = [
+  { value: 'true', labelKey: '有订阅' },
+  { value: 'false', labelKey: '无订阅' },
+];
+
+const ACTIVE_OPTIONS = [
+  { value: 1, labelKey: '近 1 天' },
+  { value: 7, labelKey: '近 7 天' },
+  { value: 30, labelKey: '近 30 天' },
+];
+
+const QUOTA_OPTIONS = [
+  { value: 'healthy', labelKey: '额度充足' },
+  { value: 'low', labelKey: '低额度' },
+  { value: 'exhausted', labelKey: '已耗尽' },
+];
+
 const UsersFilters = ({
   formInitValues,
   setFormApi,
   searchUsers,
   loadUsers,
-  activePage,
   pageSize,
   groupOptions,
   loading,
@@ -43,6 +70,10 @@ const UsersFilters = ({
     }, 100);
   };
 
+  const handleQuickSearch = () => {
+    searchUsers(1, pageSize);
+  };
+
   return (
     <Form
       initValues={formInitValues}
@@ -51,7 +82,7 @@ const UsersFilters = ({
         formApiRef.current = api;
       }}
       onSubmit={() => {
-        searchUsers(1, pageSize);
+        handleQuickSearch();
       }}
       allowEmpty={true}
       autoComplete='off'
@@ -60,7 +91,7 @@ const UsersFilters = ({
       stopValidateWithError={false}
       className='w-full md:w-auto order-1 md:order-2'
     >
-      <div className='flex flex-col md:flex-row items-center gap-2 w-full md:w-auto'>
+      <div className='flex flex-col md:flex-row items-center gap-2 w-full md:w-auto flex-wrap'>
         <div className='relative w-full md:w-64'>
           <Form.Input
             field='searchKeyword'
@@ -71,15 +102,109 @@ const UsersFilters = ({
             size='small'
           />
         </div>
-        <div className='w-full md:w-48'>
+        <div className='w-full md:w-40'>
           <Form.Select
             field='searchGroup'
             placeholder={t('选择分组')}
             optionList={groupOptions}
-            onChange={(value) => {
-              // Group change triggers automatic search
+            onChange={() => {
               setTimeout(() => {
-                searchUsers(1, pageSize);
+                handleQuickSearch();
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
+        <div className='w-full md:w-36'>
+          <Form.Select
+            field='searchRole'
+            placeholder={t('角色')}
+            optionList={ROLE_OPTIONS.map((item) => ({
+              value: item.value,
+              label: t(item.labelKey),
+            }))}
+            onChange={() => {
+              setTimeout(() => {
+                handleQuickSearch();
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
+        <div className='w-full md:w-36'>
+          <Form.Select
+            field='searchStatus'
+            placeholder={t('状态')}
+            optionList={STATUS_OPTIONS.map((item) => ({
+              value: item.value,
+              label: t(item.labelKey),
+            }))}
+            onChange={() => {
+              setTimeout(() => {
+                handleQuickSearch();
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
+        <div className='w-full md:w-36'>
+          <Form.Select
+            field='searchHasSubscription'
+            placeholder={t('订阅')}
+            optionList={SUBSCRIPTION_OPTIONS.map((item) => ({
+              value: item.value,
+              label: t(item.labelKey),
+            }))}
+            onChange={() => {
+              setTimeout(() => {
+                handleQuickSearch();
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
+        <div className='w-full md:w-36'>
+          <Form.Select
+            field='searchActiveWithinDays'
+            placeholder={t('最近活跃')}
+            optionList={ACTIVE_OPTIONS.map((item) => ({
+              value: item.value,
+              label: t(item.labelKey),
+            }))}
+            onChange={() => {
+              setTimeout(() => {
+                handleQuickSearch();
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
+        <div className='w-full md:w-36'>
+          <Form.Select
+            field='searchQuotaHealth'
+            placeholder={t('额度健康度')}
+            optionList={QUOTA_OPTIONS.map((item) => ({
+              value: item.value,
+              label: t(item.labelKey),
+            }))}
+            onChange={() => {
+              setTimeout(() => {
+                handleQuickSearch();
               }, 100);
             }}
             className='w-full'
