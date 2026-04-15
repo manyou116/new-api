@@ -52,6 +52,7 @@ const UsersTable = (usersData) => {
     resetUserPasskey,
     resetUserTwoFA,
     rowSelection,
+    visibleColumns,
     t,
   } = usersData;
 
@@ -167,16 +168,23 @@ const UsersTable = (usersData) => {
 
   // Handle compact mode by removing fixed positioning
   const tableColumns = useMemo(() => {
+    const filteredColumns = columns.filter((col) => {
+      if (!col.key) {
+        return true;
+      }
+      return visibleColumns?.[col.key] !== false;
+    });
+
     return compactMode
-      ? columns.map((col) => {
+      ? filteredColumns.map((col) => {
           if (col.dataIndex === 'operate') {
             const { fixed, ...rest } = col;
             return rest;
           }
           return col;
         })
-      : columns;
-  }, [compactMode, columns]);
+      : filteredColumns;
+  }, [compactMode, columns, visibleColumns]);
 
   return (
     <>

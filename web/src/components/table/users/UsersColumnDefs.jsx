@@ -183,6 +183,49 @@ const renderTimestamp = (timestamp, t) => {
   return timestamp2string(value);
 };
 
+const renderSubscriptionSummary = (record, t) => {
+  if (!record?.has_subscription) {
+    return <Tag color='grey' shape='circle'>{t('无订阅')}</Tag>;
+  }
+  return (
+    <Space spacing={2}>
+      <Tag color='green' shape='circle'>{t('已订阅')}</Tag>
+      {record.subscription_plan ? (
+        <Tag color='white' shape='circle'>{record.subscription_plan}</Tag>
+      ) : null}
+    </Space>
+  );
+};
+
+const renderSecuritySummary = (record, t) => {
+  const tags = [];
+  if (record?.has_two_fa) {
+    tags.push(
+      <Tag key='2fa' color='green' shape='circle'>
+        2FA
+      </Tag>,
+    );
+  }
+  if (record?.has_passkey) {
+    tags.push(
+      <Tag key='passkey' color='blue' shape='circle'>
+        Passkey
+      </Tag>,
+    );
+  }
+  if (record?.binding_count > 0) {
+    tags.push(
+      <Tag key='binding' color='white' shape='circle'>
+        {t('绑定')} {record.binding_count}
+      </Tag>,
+    );
+  }
+  if (tags.length === 0) {
+    return <span className='text-semi-color-text-2'>{t('未启用')}</span>;
+  }
+  return <Space spacing={2}>{tags}</Space>;
+};
+
 /**
  * Render invite information
  */
@@ -327,20 +370,24 @@ export const getUsersColumns = ({
   showResetTwoFAModal,
   showUserSubscriptionsModal,
   showUserReviewModal,
+  includeOperations = true,
 }) => {
   return [
     {
       title: 'ID',
       dataIndex: 'id',
+      key: 'id',
     },
     {
       title: t('用户名'),
       dataIndex: 'username',
+      key: 'username',
       render: (text, record) => renderUsername(text, record),
     },
     {
       title: t('状态'),
       dataIndex: 'info',
+      key: 'status',
       render: (text, record, index) =>
         renderStatistics(text, record, showEnableDisableModal, t),
     },
@@ -352,6 +399,7 @@ export const getUsersColumns = ({
     {
       title: t('分组'),
       dataIndex: 'group',
+      key: 'group',
       render: (text, record, index) => {
         return <div>{renderGroup(text)}</div>;
       },
@@ -359,6 +407,7 @@ export const getUsersColumns = ({
     {
       title: t('角色'),
       dataIndex: 'role',
+      key: 'role',
       render: (text, record, index) => {
         return <div>{renderRole(text, t)}</div>;
       },
@@ -366,37 +415,69 @@ export const getUsersColumns = ({
     {
       title: t('注册时间'),
       dataIndex: 'created_at',
+      key: 'created_at',
+      render: (text) => renderTimestamp(text, t),
+    },
+    {
+      title: t('最近登录'),
+      dataIndex: 'last_login_at',
+      key: 'last_login_at',
       render: (text) => renderTimestamp(text, t),
     },
     {
       title: t('最近请求'),
       dataIndex: 'last_request_at',
+      key: 'last_request_at',
       render: (text) => renderTimestamp(text, t),
+    },
+    {
+      title: t('调用次数'),
+      dataIndex: 'request_count',
+      key: 'request_count',
+      render: (text) => renderNumber(text || 0),
+    },
+    {
+      title: t('订阅'),
+      dataIndex: 'subscription',
+      key: 'subscription',
+      render: (text, record) => renderSubscriptionSummary(record, t),
+    },
+    {
+      title: t('安全'),
+      dataIndex: 'security',
+      key: 'security',
+      render: (text, record) => renderSecuritySummary(record, t),
     },
     {
       title: t('邀请信息'),
       dataIndex: 'invite',
+      key: 'invite',
       render: (text, record, index) => renderInviteInfo(text, record, t),
     },
-    {
-      title: '',
-      dataIndex: 'operate',
-      fixed: 'right',
-      width: 200,
-      render: (text, record, index) =>
-        renderOperations(text, record, {
-          setEditingUser,
-          setShowEditUser,
-          showPromoteModal,
-          showDemoteModal,
-          showEnableDisableModal,
-          showDeleteModal,
-          showResetPasskeyModal,
-          showResetTwoFAModal,
-          showUserSubscriptionsModal,
-          showUserReviewModal,
-          t,
-        }),
-    },
+    ...(includeOperations
+      ? [
+          {
+            title: '',
+            dataIndex: 'operate',
+            key: 'operate',
+            fixed: 'right',
+            width: 200,
+            render: (text, record, index) =>
+              renderOperations(text, record, {
+                setEditingUser,
+                setShowEditUser,
+                showPromoteModal,
+                showDemoteModal,
+                showEnableDisableModal,
+                showDeleteModal,
+                showResetPasskeyModal,
+                showResetTwoFAModal,
+                showUserSubscriptionsModal,
+                showUserReviewModal,
+                t,
+              }),
+          },
+        ]
+      : []),
   ];
 };

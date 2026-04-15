@@ -24,14 +24,12 @@ import {
   Card,
   Descriptions,
   Modal,
-  Select,
   Spin,
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
 import {
   API,
-  getLogOther,
   renderNumber,
   renderQuota,
   showError,
@@ -39,37 +37,6 @@ import {
 } from '../../../../helpers';
 
 const { Text, Paragraph } = Typography;
-
-const LOG_TYPE_OPTIONS = [
-  { value: 0, labelKey: '全部日志' },
-  { value: 2, labelKey: '消费日志' },
-  { value: 5, labelKey: '错误日志' },
-];
-
-const TIME_RANGE_OPTIONS = [
-  { value: 'today', labelKey: '今日' },
-  { value: '7d', labelKey: '近 7 天' },
-  { value: '30d', labelKey: '近 30 天' },
-];
-
-const getRangeTimestamps = (rangeKey) => {
-  const now = Math.floor(Date.now() / 1000);
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-
-  if (rangeKey === 'today') {
-    return {
-      start: Math.floor(startOfToday.getTime() / 1000),
-      end: now,
-    };
-  }
-
-  const days = rangeKey === '30d' ? 30 : 7;
-  return {
-    start: now - days * 86400,
-    end: now,
-  };
-};
 
 const getUserStatusMeta = (user, t) => {
   if (!user) {
@@ -120,50 +87,36 @@ const ReviewSection = ({ title, children, extra = null }) => (
 
 const UserReviewModal = ({ visible, onCancel, user, t }) => {
   const [detailLoading, setDetailLoading] = useState(false);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [userDetail, setUserDetail] = useState(null);
-  const [recentLogs, setRecentLogs] = useState([]);
-  const [stat, setStat] = useState({ quota: 0, rpm: 0, tpm: 0 });
-  const [timeRange, setTimeRange] = useState('7d');
-  const [logType, setLogType] = useState(2);
+  const [reviewSummary, setReviewSummary] = useState(null);
 
   useEffect(() => {
     if (!visible) {
-      setUserDetail(null);
-      setRecentLogs([]);
-      setStat({ quota: 0, rpm: 0, tpm: 0 });
-      setTimeRange('7d');
-      setLogType(2);
+      setReviewSummary(null);
     }
   }, [visible]);
 
   useEffect(() => {
-    if (!visible) {
-      return;
-    }
-
-    if (!user?.id || !user?.username) {
+    if (!visible || !user?.id) {
       return;
     }
 
     let disposed = false;
 
-    const loadUserDetail = async () => {
+    const loadReviewSummary = async () => {
       setDetailLoading(true);
       try {
-        const res = await API.get(`/api/user/${user.id}`);
+        const res = await API.get(`/api/user/${user.id}/review`);
         const { success, message, data } = res.data;
         if (!success) {
-          showError(message || t('加载用户信息失败'));
+          showError(message || t('加载用户审阅数据失败'));
           return;
         }
         if (!disposed) {
-          setUserDetail(data);
+          setReviewSummary(data || null);
         }
       } catch (error) {
         if (!disposed) {
-          showError(t('加载用户信息失败'));
+          showError(t('加载用户审阅数据失败'));
         }
       } finally {
         if (!disposed) {
@@ -172,111 +125,32 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
       }
     };
 
-    loadUserDetail().catch(() => {});
+    loadReviewSummary().catch(() => {});
 
     return () => {
       disposed = true;
     };
-  }, [visible, user?.id, user?.username, t]);
+  }, [visible, user?.id, t]);
 
-  useEffect(() => {
-    if (!visible || !user?.username) {
-      return;
-    }
-
-    let disposed = false;
-    const { start, end } = getRangeTimestamps(timeRange);
-
-    const loadLogsAndStats = async () => {
-      setLogsLoading(true);
-      setStatsLoading(true);
-      try {
-        const logsUrl = encodeURI(
-          `/api/log/?p=0&page_size=10&type=${logType}&username=${user.username}&start_timestamp=${start}&end_timestamp=${end}`,
-        );
-        const statUrl = encodeURI(
-          `/api/log/stat?type=${logType}&username=${user.username}&start_timestamp=${start}&end_timestamp=${end}&channel=0&group=`,
-        );
-
-        const [logsRes, statRes] = await Promise.all([
-          API.get(logsUrl),
-          API.get(statUrl),
-        ]);
-
-        if (!disposed) {
-          const logsPayload = logsRes?.data || {};
-          if (logsPayload.success) {
-            setRecentLogs(Array.isArray(logsPayload.data?.items) ? logsPayload.data.items : []);
-          } else {
-            setRecentLogs([]);
-            showError(logsPayload.message || t('加载最近使用记录失败'));
-          }
-
-          const statPayload = statRes?.data || {};
-          if (statPayload.success) {
-            setStat(statPayload.data || { quota: 0, rpm: 0, tpm: 0 });
-          } else {
-            setStat({ quota: 0, rpm: 0, tpm: 0 });
-            showError(statPayload.message || t('加载使用概览失败'));
-          }
-        }
-      } catch (error) {
-        if (!disposed) {
-          setRecentLogs([]);
-          setStat({ quota: 0, rpm: 0, tpm: 0 });
-          showError(t('加载用户审阅数据失败'));
-        }
-      } finally {
-        if (!disposed) {
-          setLogsLoading(false);
-          setStatsLoading(false);
-        }
-      }
-    };
-
-    loadLogsAndStats().catch(() => {});
-
-    return () => {
-      disposed = true;
-    };
-  }, [visible, user?.username, timeRange, logType, t]);
-
-  const reviewUser = userDetail || user;
+  const reviewUser = reviewSummary?.user || user;
   const statusMeta = getUserStatusMeta(reviewUser, t);
   const roleMeta = getRoleMeta(reviewUser?.role, t);
-
-  const modelSummary = useMemo(() => {
-    const counter = new Map();
-    recentLogs.forEach((log) => {
-      const name = log?.model_name || t('未知模型');
-      const entry = counter.get(name) || { count: 0, quota: 0, lastUsedAt: 0 };
-      entry.count += 1;
-      entry.quota += Number(log?.quota || 0);
-      entry.lastUsedAt = Math.max(entry.lastUsedAt, Number(log?.created_at || 0));
-      counter.set(name, entry);
-    });
-
-    return Array.from(counter.entries())
-      .map(([model, info]) => ({ model, ...info }))
-      .sort((a, b) => {
-        if (b.count !== a.count) {
-          return b.count - a.count;
-        }
-        return b.lastUsedAt - a.lastUsedAt;
-      })
-      .slice(0, 5);
-  }, [recentLogs, t]);
+  const subscriptions = Array.isArray(reviewSummary?.subscriptions)
+    ? reviewSummary.subscriptions
+    : [];
+  const security = reviewSummary?.security || {};
+  const usage = reviewSummary?.usage || {};
 
   const bindingRows = useMemo(() => {
     const rows = [
+      { key: t('邮箱'), value: reviewUser?.email || '' },
       { key: t('GitHub'), value: reviewUser?.github_id || '' },
       { key: t('微信'), value: reviewUser?.wechat_id || '' },
       { key: t('Telegram'), value: reviewUser?.telegram_id || '' },
       { key: t('OIDC'), value: reviewUser?.oidc_id || '' },
       { key: t('Discord'), value: reviewUser?.discord_id || '' },
-      { key: t('Lark'), value: reviewUser?.lark_id || '' },
-      { key: t('钉钉'), value: reviewUser?.dingtalk_id || '' },
-      { key: t('飞书'), value: reviewUser?.feishu_id || '' },
+      { key: t('Linux DO'), value: reviewUser?.linux_do_id || '' },
+      { key: t('妖火'), value: reviewUser?.yaohuo_id || '' },
     ];
     return rows.filter((item) => item.value);
   }, [reviewUser, t]);
@@ -310,20 +184,32 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
       key: t('最近请求'),
       value: formatMaybeTimestamp(reviewUser?.last_request_at, t),
     },
+    {
+      key: t('最近活跃'),
+      value: reviewSummary?.is_recently_active ? t('是') : t('否'),
+    },
   ];
 
-  const quotaRows = [
+  const commercialRows = [
     {
       key: t('剩余额度'),
       value: renderQuota(reviewUser?.quota || 0),
     },
     {
       key: t('已用额度'),
-      value: renderQuota(reviewUser?.used_quota || 0),
+      value: renderQuota(usage.used_quota || reviewUser?.used_quota || 0),
     },
     {
       key: t('调用次数'),
-      value: renderNumber(reviewUser?.request_count || 0),
+      value: renderNumber(usage.request_count || reviewUser?.request_count || 0),
+    },
+    {
+      key: t('订阅状态'),
+      value: reviewSummary?.has_subscription ? t('已订阅') : t('无订阅'),
+    },
+    {
+      key: t('当前订阅计划'),
+      value: reviewSummary?.subscription_plan || '-',
     },
     {
       key: t('邀请收益'),
@@ -331,24 +217,70 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
     },
   ];
 
-  const usageRows = [
+  const relationRows = [
     {
-      key: t('总消费'),
-      value: renderQuota(stat?.quota || 0),
+      key: t('邀请人 ID'),
+      value: reviewUser?.inviter_id ? reviewUser.inviter_id : t('无邀请人'),
     },
     {
-      key: 'RPM',
-      value: renderNumber(stat?.rpm || 0),
+      key: t('邀请码'),
+      value: reviewUser?.aff_code || '-',
     },
     {
-      key: 'TPM',
-      value: renderNumber(stat?.tpm || 0),
+      key: t('邀请人数'),
+      value: renderNumber(reviewUser?.aff_count || 0),
     },
     {
-      key: t('日志类型'),
-      value: t(
-        LOG_TYPE_OPTIONS.find((item) => item.value === logType)?.labelKey || '-',
-      ),
+      key: t('当前返佣额度'),
+      value: renderQuota(reviewUser?.aff_quota || 0),
+    },
+    {
+      key: t('累计返佣额度'),
+      value: renderQuota(reviewUser?.aff_history_quota || 0),
+    },
+  ];
+
+  const activityRows = [
+    {
+      key: t('调用次数'),
+      value: renderNumber(usage.request_count || reviewUser?.request_count || 0),
+    },
+    {
+      key: t('已用额度'),
+      value: renderQuota(usage.used_quota || reviewUser?.used_quota || 0),
+    },
+    {
+      key: t('最近请求'),
+      value: formatMaybeTimestamp(usage.last_request_at || reviewUser?.last_request_at, t),
+    },
+    {
+      key: t('最后活跃时间'),
+      value: formatMaybeTimestamp(reviewSummary?.last_activity_at, t),
+    },
+    {
+      key: t('最近活跃窗口'),
+      value: reviewSummary?.recently_active_days
+        ? t('近 {{days}} 天', { days: reviewSummary.recently_active_days })
+        : '-',
+    },
+  ];
+
+  const securityRows = [
+    {
+      key: '2FA',
+      value:
+        reviewSummary?.has_two_fa || security.has_2fa ? t('已启用') : t('未启用'),
+    },
+    {
+      key: 'Passkey',
+      value:
+        reviewSummary?.has_passkey || security.has_passkey
+          ? t('已启用')
+          : t('未启用'),
+    },
+    {
+      key: t('绑定数量'),
+      value: renderNumber(reviewSummary?.binding_count || security.binding_count || 0),
     },
   ];
 
@@ -366,9 +298,8 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
         </div>
       }
     >
-      <Spin spinning={detailLoading || logsLoading || statsLoading}>
+      <Spin spinning={detailLoading}>
         <div className='max-h-[72vh] overflow-y-auto pr-1 pb-2 space-y-4'>
-
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-4'>
             <ReviewSection title={t('账号概览')}>
               <Descriptions data={overviewRows} column={1} />
@@ -384,34 +315,27 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
               ) : null}
             </ReviewSection>
 
-            <ReviewSection title={t('额度概览')}>
-              <Descriptions data={quotaRows} column={1} />
+            <ReviewSection title={t('商业信息')}>
+              <Descriptions data={commercialRows} column={1} />
+              {subscriptions.length > 0 ? (
+                <div className='mt-3 flex flex-wrap gap-2'>
+                  {subscriptions.map((subscription, index) => (
+                    <Tag
+                      key={`${subscription.id || subscription.subscription_id || index}`}
+                      color='green'
+                      shape='circle'
+                    >
+                      {subscription.plan_title || subscription.subscription_plan || t('订阅计划')}
+                    </Tag>
+                  ))}
+                </div>
+              ) : null}
             </ReviewSection>
           </div>
 
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-4'>
-            <ReviewSection title={t('邀请与绑定信息')}>
-              <Descriptions
-                data={[
-                  {
-                    key: t('邀请人 ID'),
-                    value: reviewUser?.inviter_id ? reviewUser.inviter_id : t('无邀请人'),
-                  },
-                  {
-                    key: t('邀请码'),
-                    value: reviewUser?.aff_code || '-',
-                  },
-                  {
-                    key: t('邀请人数'),
-                    value: renderNumber(reviewUser?.aff_count || 0),
-                  },
-                  {
-                    key: t('当前返佣额度'),
-                    value: renderQuota(reviewUser?.aff_quota || 0),
-                  },
-                ]}
-                column={1}
-              />
+            <ReviewSection title={t('订阅与绑定信息')}>
+              <Descriptions data={relationRows} column={1} />
               {bindingRows.length > 0 ? (
                 <div className='mt-3 flex flex-wrap gap-2'>
                   {bindingRows.map((item) => (
@@ -427,117 +351,14 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
               )}
             </ReviewSection>
 
-            <ReviewSection
-              title={t('使用概览')}
-              extra={
-                <div className='flex gap-2'>
-                  <Select
-                    size='small'
-                    value={timeRange}
-                    onChange={setTimeRange}
-                    optionList={TIME_RANGE_OPTIONS.map((item) => ({
-                      value: item.value,
-                      label: t(item.labelKey),
-                    }))}
-                    style={{ width: 120 }}
-                  />
-                  <Select
-                    size='small'
-                    value={logType}
-                    onChange={setLogType}
-                    optionList={LOG_TYPE_OPTIONS.map((item) => ({
-                      value: item.value,
-                      label: t(item.labelKey),
-                    }))}
-                    style={{ width: 120 }}
-                  />
-                </div>
-              }
-            >
-              <Descriptions data={usageRows} column={1} />
+            <ReviewSection title={t('活跃与使用')}>
+              <Descriptions data={activityRows} column={1} />
             </ReviewSection>
           </div>
 
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-4'>
-            <ReviewSection title={t('常用模型')}>
-              {modelSummary.length > 0 ? (
-                <div className='space-y-3'>
-                  {modelSummary.map((item) => (
-                    <div
-                      key={item.model}
-                      className='flex items-center justify-between gap-3 rounded-lg bg-semi-color-fill-0 px-3 py-2'
-                    >
-                      <div className='min-w-0'>
-                        <div className='font-medium truncate'>{item.model}</div>
-                        <Text type='tertiary' size='small'>
-                          {t('最近使用')}: {formatMaybeTimestamp(item.lastUsedAt, t)}
-                        </Text>
-                      </div>
-                      <div className='text-right text-sm'>
-                        <div>{t('请求')} {renderNumber(item.count)}</div>
-                        <div>{t('消费')} {renderQuota(item.quota)}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <Text type='tertiary'>{t('当前时间范围内暂无模型使用记录')}</Text>
-              )}
-            </ReviewSection>
-
-            <ReviewSection title={t('最近使用记录')}>
-              {recentLogs.length > 0 ? (
-                <div className='space-y-3'>
-                  {recentLogs.map((log) => {
-                    const other = getLogOther(log.other) || {};
-                    const billingSource = other?.billing_source;
-                    return (
-                      <div
-                        key={log.id}
-                        className='rounded-lg border border-semi-color-border px-3 py-3'
-                      >
-                        <div className='flex items-center justify-between gap-3 flex-wrap'>
-                          <div className='font-medium break-all'>
-                            {log.model_name || t('未知模型')}
-                          </div>
-                          <div className='flex items-center gap-2 flex-wrap'>
-                            {log.group ? (
-                              <Tag color='white' shape='circle'>
-                                {log.group}
-                              </Tag>
-                            ) : null}
-                            {billingSource === 'subscription' ? (
-                              <Tag color='green' shape='circle'>
-                                {t('订阅抵扣')}
-                              </Tag>
-                            ) : null}
-                            {log.type === 5 ? (
-                              <Tag color='red' shape='circle'>
-                                {t('错误')}
-                              </Tag>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className='mt-2 text-sm text-semi-color-text-1 flex flex-wrap gap-x-4 gap-y-1'>
-                          <span>{t('时间')}: {formatMaybeTimestamp(log.created_at, t)}</span>
-                          <span>{t('消费')}: {renderQuota(log.quota || 0)}</span>
-                          <span>{t('提示 Tokens')}: {renderNumber(log.prompt_tokens || 0)}</span>
-                          <span>{t('补全 Tokens')}: {renderNumber(log.completion_tokens || 0)}</span>
-                        </div>
-                        {log.request_id ? (
-                          <div className='mt-2'>
-                            <Text type='tertiary' size='small'>
-                              Request ID: {log.request_id}
-                            </Text>
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <Text type='tertiary'>{t('当前时间范围内暂无使用记录')}</Text>
-              )}
+            <ReviewSection title={t('安全信息')}>
+              <Descriptions data={securityRows} column={1} />
             </ReviewSection>
           </div>
 

@@ -2,13 +2,13 @@ package model
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	json "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 
@@ -54,6 +54,12 @@ type User struct {
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	HasSubscription  bool           `json:"has_subscription,omitempty" gorm:"-"`
+	SubscriptionPlan string         `json:"subscription_plan,omitempty" gorm:"-"`
+	HasTwoFA         bool           `json:"has_two_fa,omitempty" gorm:"-"`
+	HasPasskey       bool           `json:"has_passkey,omitempty" gorm:"-"`
+	BindingCount     int            `json:"binding_count,omitempty" gorm:"-"`
+	IsRecentlyActive bool           `json:"is_recently_active,omitempty" gorm:"-"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -193,6 +199,44 @@ func GetMaxUserId() int {
 	return user.Id
 }
 
+type UserSearchFilters struct {
+	Keyword          string
+	Group            string
+	Role             *int
+	MinRole          *int
+	Status           *int
+	HasSubscription  *bool
+	ActiveWithinDays *int
+	QuotaHealth      string
+	IncludeDeleted   bool
+	DeletedOnly      bool
+}
+
+type UserSummary struct {
+	Total               int64 `json:"total"`
+	ActiveCount         int64 `json:"active_count"`
+	DisabledCount       int64 `json:"disabled_count"`
+	DeletedCount        int64 `json:"deleted_count"`
+	AdminCount          int64 `json:"admin_count"`
+	SubscribedCount     int64 `json:"subscribed_count"`
+	RecentlyActiveCount int64 `json:"recently_active_count"`
+}
+
+type UserReviewSummary struct {
+	User               *User                  `json:"user"`
+	Subscriptions      []SubscriptionSummary  `json:"subscriptions"`
+	Usage              map[string]interface{} `json:"usage"`
+	Security           map[string]interface{} `json:"security"`
+	HasSubscription    bool                   `json:"has_subscription"`
+	SubscriptionPlan   string                 `json:"subscription_plan"`
+	HasTwoFA           bool                   `json:"has_two_fa"`
+	HasPasskey         bool                   `json:"has_passkey"`
+	BindingCount       int                    `json:"binding_count"`
+	IsRecentlyActive   bool                   `json:"is_recently_active"`
+	LastActivityAt     int64                  `json:"last_activity_at"`
+	RecentlyActiveDays int                    `json:"recently_active_days"`
+}
+
 func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err error) {
 	// Start transaction
 	tx := DB.Begin()
@@ -227,12 +271,129 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	return users, total, nil
 }
 
-func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
+func buildUserSearchQuery(tx *gorm.DB, filters UserSearchFilters) *gorm.DB {
+	query := tx.Model(&User{})
+	if filters.DeletedOnly {
+		query = query.Unscoped().Where("deleted_at IS NOT NULL")
+	} else if filters.IncludeDeleted {
+		query = query.Unscoped()
+	} else {
+		query = query.Where("deleted_at IS NULL")
+	}
+	if filters.Keyword != "" {
+		likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
+		if keywordInt, err := strconv.Atoi(filters.Keyword); err == nil {
+			likeCondition = "id = ? OR " + likeCondition
+			query = query.Where(
+				likeCondition,
+				keywordInt,
+				"%"+filters.Keyword+"%",
+				"%"+filters.Keyword+"%",
+				"%"+filters.Keyword+"%",
+			)
+		} else {
+			query = query.Where(
+				likeCondition,
+				"%"+filters.Keyword+"%",
+				"%"+filters.Keyword+"%",
+				"%"+filters.Keyword+"%",
+			)
+		}
+	}
+	if filters.Group != "" {
+		query = query.Where(commonGroupCol+" = ?", filters.Group)
+	}
+	if filters.Role != nil {
+		query = query.Where("role = ?", *filters.Role)
+	}
+	if filters.MinRole != nil {
+		query = query.Where("role >= ?", *filters.MinRole)
+	}
+	if filters.Status != nil {
+		query = query.Where("status = ?", *filters.Status)
+	}
+	if filters.HasSubscription != nil {
+		now := common.GetTimestamp()
+		subQuery := DB.Model(&UserSubscription{}).
+			Select("1").
+			Where("user_id = users.id AND status = ? AND end_time > ?", "active", now)
+		if *filters.HasSubscription {
+			query = query.Where("EXISTS (?)", subQuery)
+		} else {
+			query = query.Where("NOT EXISTS (?)", subQuery)
+		}
+	}
+	if filters.ActiveWithinDays != nil && *filters.ActiveWithinDays > 0 {
+		threshold := common.GetTimestamp() - int64(*filters.ActiveWithinDays)*86400
+		query = query.Where("last_request_at >= ?", threshold)
+	}
+	switch filters.QuotaHealth {
+	case "exhausted":
+		query = query.Where("quota <= 0")
+	case "low":
+		query = query.Where("quota > 0 AND quota <= ?", 500000)
+	case "healthy":
+		query = query.Where("quota > ?", 500000)
+	}
+	return query
+}
+
+func enrichUsersForAdmin(users []*User, recentDays int) {
+	if len(users) == 0 {
+		return
+	}
+	now := common.GetTimestamp()
+	threshold := now - int64(recentDays)*86400
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		user.HasTwoFA = IsTwoFAEnabled(user.Id)
+		if _, err := GetPasskeyByUserID(user.Id); err == nil {
+			user.HasPasskey = true
+		}
+		user.BindingCount = countUserBindings(user)
+		user.IsRecentlyActive = user.LastRequestAt > 0 && user.LastRequestAt >= threshold
+		subs, err := GetAllActiveUserSubscriptions(user.Id)
+		if err == nil && len(subs) > 0 {
+			user.HasSubscription = true
+			if subs[0].Subscription != nil {
+				plan, planErr := GetSubscriptionPlanById(subs[0].Subscription.PlanId)
+				if planErr == nil && plan != nil {
+					user.SubscriptionPlan = plan.Title
+				}
+			}
+		}
+	}
+}
+
+func countUserBindings(user *User) int {
+	if user == nil {
+		return 0
+	}
+	count := 0
+	bindings := []string{
+		user.Email,
+		user.GitHubId,
+		user.DiscordId,
+		user.OidcId,
+		user.WeChatId,
+		user.TelegramId,
+		user.LinuxDOId,
+		user.YaohuoId,
+	}
+	for _, binding := range bindings {
+		if strings.TrimSpace(binding) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func SearchUsers(filters UserSearchFilters, startIdx int, num int) ([]*User, int64, error) {
 	var users []*User
 	var total int64
-	var err error
 
-	// 开始事务
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -243,55 +404,94 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 		}
 	}()
 
-	// 构建基础查询
-	query := tx.Unscoped().Model(&User{})
-
-	// 构建搜索条件
-	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
-
-	// 尝试将关键字转换为整数ID
-	keywordInt, err := strconv.Atoi(keyword)
-	if err == nil {
-		// 如果是数字，同时搜索ID和其他字段
-		likeCondition = "id = ? OR " + likeCondition
-		if group != "" {
-			query = query.Where("("+likeCondition+") AND "+commonGroupCol+" = ?",
-				keywordInt, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", group)
-		} else {
-			query = query.Where(likeCondition,
-				keywordInt, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
-		}
-	} else {
-		// 非数字关键字，只搜索字符串字段
-		if group != "" {
-			query = query.Where("("+likeCondition+") AND "+commonGroupCol+" = ?",
-				"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", group)
-		} else {
-			query = query.Where(likeCondition,
-				"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
-		}
-	}
-
-	// 获取总数
-	err = query.Count(&total).Error
-	if err != nil {
+	query := buildUserSearchQuery(tx, filters).Session(&gorm.Session{})
+	if err := query.Count(&total).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
-
-	// 获取分页数据
-	err = query.Omit("password").Order("id desc").Limit(num).Offset(startIdx).Find(&users).Error
-	if err != nil {
+	listQuery := buildUserSearchQuery(tx, filters).Session(&gorm.Session{})
+	if err := listQuery.Omit("password").Order("id desc").Limit(num).Offset(startIdx).Find(&users).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
-
-	// 提交事务
-	if err = tx.Commit().Error; err != nil {
+	if err := tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
-
+	enrichUsersForAdmin(users, 7)
 	return users, total, nil
+}
+
+func GetUserSummary(filters UserSearchFilters) (*UserSummary, error) {
+	summary := &UserSummary{}
+	if err := buildUserSearchQuery(DB, filters).Count(&summary.Total).Error; err != nil {
+		return nil, err
+	}
+	if err := buildUserSearchQuery(DB, filters).Where("status = ?", common.UserStatusEnabled).Count(&summary.ActiveCount).Error; err != nil {
+		return nil, err
+	}
+	if err := buildUserSearchQuery(DB, filters).Where("status = ?", common.UserStatusDisabled).Count(&summary.DisabledCount).Error; err != nil {
+		return nil, err
+	}
+	deletedFilters := filters
+	deletedFilters.IncludeDeleted = true
+	if err := buildUserSearchQuery(DB, deletedFilters).Where("deleted_at IS NOT NULL").Count(&summary.DeletedCount).Error; err != nil {
+		return nil, err
+	}
+	if err := buildUserSearchQuery(DB, filters).Where("role >= ?", common.RoleAdminUser).Count(&summary.AdminCount).Error; err != nil {
+		return nil, err
+	}
+	if err := buildUserSearchQuery(DB, filters).Where("last_request_at >= ?", common.GetTimestamp()-7*86400).Count(&summary.RecentlyActiveCount).Error; err != nil {
+		return nil, err
+	}
+	subscribedFilters := filters
+	subscribedFilters.HasSubscription = boolPtr(true)
+	if err := buildUserSearchQuery(DB, subscribedFilters).Count(&summary.SubscribedCount).Error; err != nil {
+		return nil, err
+	}
+	return summary, nil
+}
+
+func GetUserReviewSummary(userId int) (*UserReviewSummary, error) {
+	user, err := GetUserById(userId, false)
+	if err != nil {
+		return nil, err
+	}
+	enrichUsersForAdmin([]*User{user}, 7)
+	subscriptions, err := GetAllUserSubscriptions(userId)
+	if err != nil {
+		return nil, err
+	}
+	lastActivityAt := user.LastRequestAt
+	if lastActivityAt <= 0 {
+		lastActivityAt = user.LastLoginAt
+	}
+	review := &UserReviewSummary{
+		User:               user,
+		Subscriptions:      subscriptions,
+		HasSubscription:    user.HasSubscription,
+		SubscriptionPlan:   user.SubscriptionPlan,
+		HasTwoFA:           user.HasTwoFA,
+		HasPasskey:         user.HasPasskey,
+		BindingCount:       user.BindingCount,
+		IsRecentlyActive:   user.IsRecentlyActive,
+		LastActivityAt:     lastActivityAt,
+		RecentlyActiveDays: 7,
+		Usage: map[string]interface{}{
+			"request_count": user.RequestCount,
+			"used_quota":    user.UsedQuota,
+			"last_request_at": user.LastRequestAt,
+		},
+		Security: map[string]interface{}{
+			"has_2fa":       user.HasTwoFA,
+			"has_passkey":   user.HasPasskey,
+			"binding_count": user.BindingCount,
+		},
+	}
+	return review, nil
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func GetUserById(id int, selectAll bool) (*User, error) {
