@@ -580,7 +580,10 @@ func updateUserBillingPreferenceToSubscriptionFirst(userId int) error {
 	}
 	current.BillingPreference = "subscription_first"
 	user.SetSetting(current)
-	return user.Update(false)
+	if err := DB.Model(&User{}).Where("id = ?", userId).Update("setting", user.Setting).Error; err != nil {
+		return err
+	}
+	return updateUserCache(*user)
 }
 
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
