@@ -91,8 +91,7 @@ const SelectableButtonGroup = ({
   const getResponsiveConfig = () => {
     if (containerWidth <= 280) return { columns: 1, showTags: true }; // 极窄：1列+标签
     if (containerWidth <= 380) return { columns: 2, showTags: true }; // 窄屏：2列+标签
-    if (containerWidth <= 460) return { columns: 3, showTags: false }; // 中等：3列不加标签
-    return { columns: 3, showTags: true }; // 最宽：3列+标签
+    return { columns: 3, showTags: true }; // 其余宽度：3列+标签
   };
 
   const { columns: perRow, showTags: shouldShowTags } = getResponsiveConfig();
