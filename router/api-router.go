@@ -115,6 +115,8 @@ func SetApiRouter(router *gin.Engine) {
 			{
 				adminRoute.GET("/", controller.GetAllUsers)
 				adminRoute.GET("/summary", controller.GetUserSummary)
+				adminRoute.GET("/dashboard/overview", controller.GetAdminDashboardOverview)
+				adminRoute.GET("/dashboard/rankings", controller.GetAdminUserRankings)
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
 				adminRoute.GET("/search", controller.SearchUsers)
