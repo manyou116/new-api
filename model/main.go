@@ -61,6 +61,14 @@ func initCol() {
 	//common.SysLog("Using Log SQL Type: " + common.LogSqlType)
 }
 
+func GetCommonGroupCol() string {
+	return commonGroupCol
+}
+
+func GetCommonKeyCol() string {
+	return commonKeyCol
+}
+
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB

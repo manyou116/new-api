@@ -11,6 +11,7 @@ import (
 	json "github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
@@ -237,6 +238,7 @@ type UserReviewSummary struct {
 	Usage               map[string]interface{}   `json:"usage"`
 	Security            map[string]interface{}   `json:"security"`
 	Bindings            []UserBindingSummaryItem `json:"bindings"`
+	AvailableGroups     map[string]string        `json:"available_groups"`
 	HasSubscription     bool                     `json:"has_subscription"`
 	SubscriptionPlan    string                   `json:"subscription_plan"`
 	BillingPreference   string                   `json:"billing_preference"`
@@ -636,6 +638,10 @@ func GetUserReviewSummary(userId int) (*UserReviewSummary, error) {
 		lastActivityAt = user.LastLoginAt
 	}
 	settingMap := user.GetSetting()
+	availableGroups := make(map[string]string)
+	for groupName := range ratio_setting.GetGroupRatioCopy() {
+		availableGroups[groupName] = fmt.Sprintf("%.2f", ratio_setting.GetGroupRatio(groupName))
+	}
 	review := &UserReviewSummary{
 		User:              user,
 		Subscriptions:     subscriptions,
@@ -650,6 +656,7 @@ func GetUserReviewSummary(userId int) (*UserReviewSummary, error) {
 			"binding_count": user.BindingCount,
 		},
 		Bindings:           buildUserBindingSummaryItems(user),
+		AvailableGroups:    availableGroups,
 		HasSubscription:    user.HasSubscription,
 		SubscriptionPlan:   user.SubscriptionPlan,
 		BillingPreference:  common.NormalizeBillingPreference(settingMap.BillingPreference),

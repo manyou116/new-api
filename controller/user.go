@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/QuantumNous/new-api/constant"
 
@@ -295,6 +296,10 @@ type AdminBillingPreferenceRequest struct {
 	BillingPreference string `json:"billing_preference"`
 }
 
+type AdminUserGroupRequest struct {
+	Group string `json:"group"`
+}
+
 func SearchUsers(c *gin.Context) {
 	filters := buildUserSearchFilters(c)
 	pageInfo := common.GetPageQuery(c)
@@ -387,6 +392,53 @@ func UpdateUserBillingPreference(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{"billing_preference": current.BillingPreference})
+}
+
+func UpdateUserGroup(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var req AdminUserGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	nextGroup := strings.TrimSpace(req.Group)
+	if nextGroup == "" {
+		common.ApiErrorMsg(c, "分组不能为空")
+		return
+	}
+	if _, ok := ratio_setting.GetGroupRatioCopy()[nextGroup]; !ok {
+		common.ApiErrorMsg(c, "分组不存在")
+		return
+	}
+	user, err := model.GetUserById(id, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	myRole := c.GetInt("role")
+	if myRole <= user.Role && myRole != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+	previousGroup := user.Group
+	if previousGroup == nextGroup {
+		common.ApiSuccess(c, gin.H{"group": nextGroup})
+		return
+	}
+	if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update(model.GetCommonGroupCol(), nextGroup).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	user.Group = nextGroup
+	if err := model.UpdateUserGroupCache(user.Id, nextGroup); err != nil {
+		common.SysLog("failed to update user group cache: " + err.Error())
+	}
+	model.RecordLog(user.Id, model.LogTypeManage, fmt.Sprintf("管理员将用户分组从 %s 修改为 %s", previousGroup, nextGroup))
+	common.ApiSuccess(c, gin.H{"group": nextGroup})
 }
 
 func GetUser(c *gin.Context) {

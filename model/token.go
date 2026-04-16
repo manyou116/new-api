@@ -78,6 +78,33 @@ func (token *Token) GetIpLimits() []string {
 	return ipLimits
 }
 
+func GetAdminUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
+	var tokens []*Token
+	if userId <= 0 {
+		return tokens, errors.New("user id is invalid")
+	}
+	err := DB.Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
+	return tokens, err
+}
+
+func CountAdminUserTokens(userId int) (int64, error) {
+	if userId <= 0 {
+		return 0, errors.New("user id is invalid")
+	}
+	var count int64
+	err := DB.Model(&Token{}).Where("user_id = ?", userId).Count(&count).Error
+	return count, err
+}
+
+func GetAdminUserTokenById(tokenId int, userId int) (*Token, error) {
+	if tokenId == 0 || userId == 0 {
+		return nil, errors.New("token id or user id is invalid")
+	}
+	token := Token{}
+	err := DB.Where("id = ? AND user_id = ?", tokenId, userId).First(&token).Error
+	return &token, err
+}
+
 func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	var tokens []*Token
 	var err error

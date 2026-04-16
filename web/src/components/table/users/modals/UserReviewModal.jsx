@@ -40,6 +40,8 @@ import {
 
 const { Text, Paragraph } = Typography;
 
+const TOKEN_PAGE_SIZE = 20;
+
 const BILLING_PREFERENCE_OPTIONS = [
   { value: 'subscription_first', labelKey: '优先订阅' },
   { value: 'wallet_first', labelKey: '优先钱包' },
@@ -99,11 +101,22 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
   const [reviewSummary, setReviewSummary] = useState(null);
   const [billingPreference, setBillingPreference] = useState('subscription_first');
   const [savingBillingPreference, setSavingBillingPreference] = useState(false);
+  const [userGroup, setUserGroup] = useState('default');
+  const [savingUserGroup, setSavingUserGroup] = useState(false);
+  const [adminTokens, setAdminTokens] = useState([]);
+  const [loadingTokens, setLoadingTokens] = useState(false);
+  const [revealingTokenId, setRevealingTokenId] = useState(null);
+  const [savingTokenGroupId, setSavingTokenGroupId] = useState(null);
 
   useEffect(() => {
     if (!visible) {
       setReviewSummary(null);
       setBillingPreference('subscription_first');
+      setUserGroup('default');
+      setAdminTokens([]);
+      setLoadingTokens(false);
+      setRevealingTokenId(null);
+      setSavingTokenGroupId(null);
     }
   }, [visible]);
 
@@ -116,9 +129,13 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
 
     const loadReviewSummary = async () => {
       setDetailLoading(true);
+      setLoadingTokens(true);
       try {
-        const res = await API.get(`/api/user/${user.id}/review`);
-        const { success, message, data } = res.data;
+        const [reviewRes, tokenRes] = await Promise.all([
+          API.get(`/api/user/${user.id}/review`),
+          API.get(`/api/user/${user.id}/tokens?p=0&size=${TOKEN_PAGE_SIZE}`),
+        ]);
+        const { success, message, data } = reviewRes.data;
         if (!success) {
           showError(message || t('加载用户审阅数据失败'));
           return;
@@ -127,6 +144,12 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
           const summary = data || null;
           setReviewSummary(summary);
           setBillingPreference(summary?.billing_preference || 'subscription_first');
+          setUserGroup(summary?.user?.group || 'default');
+          const tokenSuccess = tokenRes.data?.success;
+          if (!tokenSuccess) {
+            showError(tokenRes.data?.message || t('加载用户 API Keys 失败'));
+          }
+          setAdminTokens(tokenSuccess ? tokenRes.data?.data?.items || [] : []);
         }
       } catch (error) {
         if (!disposed) {
@@ -135,6 +158,7 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
       } finally {
         if (!disposed) {
           setDetailLoading(false);
+          setLoadingTokens(false);
         }
       }
     };
@@ -187,10 +211,131 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
     }
   };
 
+  const handleSaveUserGroup = async () => {
+    if (!reviewUser?.id) {
+      return;
+    }
+    setSavingUserGroup(true);
+    try {
+      const res = await API.put(`/api/user/${reviewUser.id}/group`, {
+        group: userGroup,
+      });
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('保存用户分组失败'));
+        return;
+      }
+      const nextGroup = data?.group || userGroup;
+      setUserGroup(nextGroup);
+      setReviewSummary((prev) =>
+        prev
+          ? {
+              ...prev,
+              user: {
+                ...(prev.user || {}),
+                group: nextGroup,
+              },
+            }
+          : prev,
+      );
+      showSuccess(t('保存成功'));
+    } catch (error) {
+      showError(t('保存用户分组失败'));
+    } finally {
+      setSavingUserGroup(false);
+    }
+  };
+
+  const handleRevealTokenKey = async (tokenId) => {
+    if (!reviewUser?.id || !tokenId) {
+      return;
+    }
+    setRevealingTokenId(tokenId);
+    try {
+      const res = await API.post(`/api/user/${reviewUser.id}/tokens/${tokenId}/key`);
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('查看 API Key 失败'));
+        return;
+      }
+      const fullKey = data?.key || '';
+      setAdminTokens((prev) =>
+        prev.map((token) =>
+          token.id === tokenId
+            ? {
+                ...token,
+                key: fullKey,
+                full_key_visible: true,
+              }
+            : token,
+        ),
+      );
+      showSuccess(t('已显示完整 API Key'));
+    } catch (error) {
+      showError(t('查看 API Key 失败'));
+    } finally {
+      setRevealingTokenId(null);
+    }
+  };
+
+  const handleSaveTokenGroup = async (tokenId, nextGroup) => {
+    if (!reviewUser?.id || !tokenId || !nextGroup) {
+      return;
+    }
+    setSavingTokenGroupId(tokenId);
+    try {
+      const res = await API.put(`/api/user/${reviewUser.id}/tokens/${tokenId}/group`, {
+        group: nextGroup,
+      });
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('保存令牌分组失败'));
+        return;
+      }
+      const savedGroup = data?.group || nextGroup;
+      setAdminTokens((prev) =>
+        prev.map((token) =>
+          token.id === tokenId
+            ? {
+                ...token,
+                group: savedGroup,
+              }
+            : token,
+        ),
+      );
+      showSuccess(t('保存成功'));
+    } catch (error) {
+      showError(t('保存令牌分组失败'));
+    } finally {
+      setSavingTokenGroupId(null);
+    }
+  };
+
+  const groupOptions = useMemo(() => {
+    const availableGroups = reviewSummary?.available_groups || {};
+    return Object.keys(availableGroups).map((group) => ({
+      value: group,
+      label: `${group}${availableGroups[group] ? ` · ${availableGroups[group]}` : ''}`,
+    }));
+  }, [reviewSummary?.available_groups]);
+
   const bindingRows = useMemo(() => {
     const rows = Array.isArray(reviewSummary?.bindings) ? reviewSummary.bindings : [];
     return rows.filter((item) => item?.value);
   }, [reviewSummary?.bindings]);
+
+  const tokenRows = useMemo(() => {
+    return adminTokens.map((token) => ({
+      id: token.id,
+      name: token.name || '-',
+      group: token.group || '-',
+      status: token.status,
+      remainQuota: token.unlimited_quota ? t('无限额度') : renderQuota(token.remain_quota || 0),
+      keyText: token.key || '-',
+      isVisible: !!token.full_key_visible,
+      groupOptions,
+    }));
+  }, [adminTokens, groupOptions, t]);
 
   const overviewRows = [
     {
@@ -203,7 +348,7 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
     },
     {
       key: t('分组'),
-      value: reviewUser?.group || '-',
+      value: userGroup || reviewUser?.group || '-',
     },
     {
       key: t('显示名称'),
@@ -330,6 +475,22 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
     },
   ];
 
+  const getTokenStatusText = (status) => {
+    if (status === 1) {
+      return t('已启用');
+    }
+    if (status === 2) {
+      return t('已禁用');
+    }
+    if (status === 3) {
+      return t('已过期');
+    }
+    if (status === 4) {
+      return t('已耗尽');
+    }
+    return t('未知状态');
+  };
+
   return (
     <Modal
       centered
@@ -349,6 +510,22 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-4'>
             <ReviewSection title={t('账号概览')}>
               <Descriptions data={overviewRows} column={1} />
+              <div className='mt-3 flex items-center gap-2'>
+                <Select
+                  size='small'
+                  value={userGroup}
+                  onChange={setUserGroup}
+                  optionList={groupOptions}
+                />
+                <Button
+                  size='small'
+                  type='primary'
+                  loading={savingUserGroup}
+                  onClick={handleSaveUserGroup}
+                >
+                  {t('保存分组')}
+                </Button>
+              </div>
               {reviewUser?.remark ? (
                 <div className='mt-3'>
                   <Text type='tertiary' size='small'>
@@ -431,6 +608,56 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-4'>
             <ReviewSection title={t('安全信息')}>
               <Descriptions data={securityRows} column={1} />
+            </ReviewSection>
+
+            <ReviewSection title={t('API Keys')}>
+              {loadingTokens ? (
+                <div className='py-6 flex justify-center'>
+                  <Spin spinning />
+                </div>
+              ) : tokenRows.length > 0 ? (
+                <div className='space-y-3'>
+                  {tokenRows.map((token) => (
+                    <Card key={token.id} className='!rounded-lg !shadow-none border border-[var(--semi-color-border)]'>
+                      <div className='flex flex-col gap-3'>
+                        <div className='flex flex-wrap items-center gap-2'>
+                          <Tag color='blue' shape='circle'>{token.name}</Tag>
+                          <Tag color='white' shape='circle'>{t('分组')}: {token.group}</Tag>
+                          <Tag color='grey' shape='circle'>{getTokenStatusText(token.status)}</Tag>
+                          <Tag color='white' shape='circle'>{t('额度')}: {token.remainQuota}</Tag>
+                        </div>
+                        <div className='flex items-center gap-2 flex-wrap'>
+                          <Text>{t('令牌分组')}</Text>
+                          <Select
+                            size='small'
+                            value={token.group}
+                            optionList={token.groupOptions}
+                            loading={savingTokenGroupId === token.id}
+                            onChange={(value) => handleSaveTokenGroup(token.id, value)}
+                          />
+                        </div>
+                        <div className='flex items-center gap-2 flex-wrap'>
+                          <Text className='break-all'>{token.keyText}</Text>
+                          <Button
+                            size='small'
+                            type='primary'
+                            theme='light'
+                            loading={revealingTokenId === token.id}
+                            disabled={token.isVisible}
+                            onClick={() => handleRevealTokenKey(token.id)}
+                          >
+                            {token.isVisible ? t('已显示') : t('查看完整 Key')}
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Text type='tertiary' size='small'>
+                  {t('暂无 API Keys')}
+                </Text>
+              )}
             </ReviewSection>
           </div>
 
