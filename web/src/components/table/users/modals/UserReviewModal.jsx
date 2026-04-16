@@ -96,6 +96,8 @@ const ReviewSection = ({ title, children, extra = null }) => (
   </Card>
 );
 
+const confirmModal = Modal.confirm;
+
 const UserReviewModal = ({ visible, onCancel, user, t }) => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [reviewSummary, setReviewSummary] = useState(null);
@@ -107,6 +109,7 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
   const [loadingTokens, setLoadingTokens] = useState(false);
   const [revealingTokenId, setRevealingTokenId] = useState(null);
   const [savingTokenGroupId, setSavingTokenGroupId] = useState(null);
+  const [resettingSubscriptionId, setResettingSubscriptionId] = useState(null);
 
   useEffect(() => {
     if (!visible) {
@@ -117,6 +120,7 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
       setLoadingTokens(false);
       setRevealingTokenId(null);
       setSavingTokenGroupId(null);
+      setResettingSubscriptionId(null);
     }
   }, [visible]);
 
@@ -309,6 +313,58 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
     } finally {
       setSavingTokenGroupId(null);
     }
+  };
+
+  const handleResetSubscriptionQuota = async (subscriptionId) => {
+    if (!subscriptionId) {
+      return;
+    }
+    confirmModal({
+      title: t('确认重置该订阅用量？'),
+      content: t('此操作会将当前订阅的已用额度清零，但不会修改订阅总额度、到期时间和自动重置周期。'),
+      okText: t('确认重置'),
+      cancelText: t('取消'),
+      okButtonProps: {
+        loading: resettingSubscriptionId === subscriptionId,
+      },
+      onOk: async () => {
+        setResettingSubscriptionId(subscriptionId);
+        try {
+          const res = await API.post(`/api/subscription/admin/user_subscriptions/${subscriptionId}/reset_quota`);
+          const { success, message } = res.data;
+          if (!success) {
+            showError(message || t('重置订阅用量失败'));
+            return;
+          }
+          setReviewSummary((prev) => {
+            if (!prev) {
+              return prev;
+            }
+            return {
+              ...prev,
+              subscriptions: (prev.subscriptions || []).map((item) => {
+                const currentId = item?.subscription?.id;
+                if (currentId !== subscriptionId) {
+                  return item;
+                }
+                return {
+                  ...item,
+                  subscription: {
+                    ...item.subscription,
+                    amount_used: 0,
+                  },
+                };
+              }),
+            };
+          });
+          showSuccess(t('重置成功'));
+        } catch (error) {
+          showError(t('重置订阅用量失败'));
+        } finally {
+          setResettingSubscriptionId(null);
+        }
+      },
+    });
   };
 
   const groupOptions = useMemo(() => {
@@ -563,19 +619,6 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
               }
             >
               <Descriptions data={commercialRows} column={1} />
-              {subscriptions.length > 0 ? (
-                <div className='mt-3 flex flex-wrap gap-2'>
-                  {subscriptions.map((subscription, index) => (
-                    <Tag
-                      key={`${subscription.id || subscription.subscription_id || index}`}
-                      color='green'
-                      shape='circle'
-                    >
-                      {subscription.plan_title || subscription.subscription_plan || t('订阅计划')}
-                    </Tag>
-                  ))}
-                </div>
-              ) : null}
             </ReviewSection>
           </div>
 
@@ -596,6 +639,55 @@ const UserReviewModal = ({ visible, onCancel, user, t }) => {
               ) : (
                 <Text type='tertiary' size='small'>
                   {t('暂无绑定账号')}
+                </Text>
+              )}
+            </ReviewSection>
+
+            <ReviewSection title={t('订阅管理')}>
+              {subscriptions.length > 0 ? (
+                <div className='space-y-3'>
+                  {subscriptions.map((subscription, index) => {
+                    const subscriptionData = subscription?.subscription || {};
+                    const subscriptionId = subscriptionData.id || index;
+                    const remainQuota = subscriptionData.amount_total > 0
+                      ? renderQuota((subscriptionData.amount_total || 0) - (subscriptionData.amount_used || 0))
+                      : t('无限额度');
+                    return (
+                      <Card
+                        key={`${subscriptionData.id || subscription.subscription_id || index}`}
+                        className='!rounded-lg !shadow-none border border-[var(--semi-color-border)]'
+                      >
+                        <div className='flex flex-col gap-3'>
+                          <div className='flex flex-wrap items-center gap-2'>
+                            <Tag color='green' shape='circle'>
+                              {subscription.plan_title || subscription.subscription_plan || t('订阅计划')}
+                            </Tag>
+                            <Tag color='white' shape='circle'>
+                              {t('已用')}: {renderQuota(subscriptionData.amount_used || 0)}
+                            </Tag>
+                            <Tag color='white' shape='circle'>
+                              {t('剩余')}: {remainQuota}
+                            </Tag>
+                          </div>
+                          <div className='flex justify-end'>
+                            <Button
+                              size='small'
+                              type='danger'
+                              theme='light'
+                              loading={resettingSubscriptionId === subscriptionId}
+                              onClick={() => handleResetSubscriptionQuota(subscriptionId)}
+                            >
+                              {t('重置订阅用量')}
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              ) : (
+                <Text type='tertiary' size='small'>
+                  {t('暂无订阅记录')}
                 </Text>
               )}
             </ReviewSection>

@@ -857,6 +857,23 @@ func AdminExtendUserSubscription(userSubscriptionId int, durationUnit string, du
 	return returnMsg, nil
 }
 
+func AdminResetUserSubscriptionQuota(userSubscriptionId int) error {
+	if userSubscriptionId <= 0 {
+		return errors.New("invalid userSubscriptionId")
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var sub UserSubscription
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
+			return err
+		}
+		return tx.Model(&sub).Updates(map[string]interface{}{
+			"amount_used": 0,
+			"updated_at":  common.GetTimestamp(),
+		}).Error
+	})
+}
+
 // AdminInvalidateUserSubscription marks a user subscription as cancelled and ends it immediately.
 func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 	if userSubscriptionId <= 0 {
