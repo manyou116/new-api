@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,127 @@ func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
 		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
 	}
 	return maskedTokens
+}
+
+type AdminUpdateUserTokenGroupRequest struct {
+	Group string `json:"group"`
+}
+
+func GetAdminUserTokens(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userId <= 0 {
+		common.ApiError(c, err)
+		return
+	}
+	targetUser, err := model.GetUserById(userId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	myRole := c.GetInt("role")
+	if myRole <= targetUser.Role && myRole != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+	pageInfo := common.GetPageQuery(c)
+	tokens, err := model.GetAdminUserTokens(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	total, err := model.CountAdminUserTokens(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	common.ApiSuccess(c, pageInfo)
+}
+
+func GetAdminUserTokenKey(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userId <= 0 {
+		common.ApiError(c, err)
+		return
+	}
+	tokenId, err := strconv.Atoi(c.Param("tokenId"))
+	if err != nil || tokenId <= 0 {
+		common.ApiError(c, err)
+		return
+	}
+	targetUser, err := model.GetUserById(userId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	myRole := c.GetInt("role")
+	if myRole <= targetUser.Role && myRole != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+	token, err := model.GetAdminUserTokenById(tokenId, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordLog(userId, model.LogTypeManage, fmt.Sprintf("管理员查看了用户 %s 的 API Key（Token ID: %d）", targetUser.Username, token.Id))
+	common.ApiSuccess(c, gin.H{
+		"key": token.GetFullKey(),
+	})
+}
+
+func UpdateAdminUserTokenGroup(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userId <= 0 {
+		common.ApiError(c, err)
+		return
+	}
+	tokenId, err := strconv.Atoi(c.Param("tokenId"))
+	if err != nil || tokenId <= 0 {
+		common.ApiError(c, err)
+		return
+	}
+	var req AdminUpdateUserTokenGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	nextGroup := strings.TrimSpace(req.Group)
+	if nextGroup == "" {
+		common.ApiErrorMsg(c, "分组不能为空")
+		return
+	}
+	targetUser, err := model.GetUserById(userId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	myRole := c.GetInt("role")
+	if myRole <= targetUser.Role && myRole != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+	userUsableGroups := service.GetUserUsableGroups(targetUser.Group)
+	if _, ok := userUsableGroups[nextGroup]; !ok && nextGroup != targetUser.Group {
+		common.ApiErrorMsg(c, "分组不存在或用户不可用")
+		return
+	}
+	token, err := model.GetAdminUserTokenById(tokenId, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if token.Group == nextGroup {
+		common.ApiSuccess(c, gin.H{"group": nextGroup})
+		return
+	}
+	if err := model.DB.Model(&model.Token{}).Where("id = ? AND user_id = ?", token.Id, userId).Update(model.GetCommonGroupCol(), nextGroup).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordLog(userId, model.LogTypeManage, fmt.Sprintf("管理员将用户 %s 的令牌分组从 %s 修改为 %s（Token ID: %d）", targetUser.Username, token.Group, nextGroup, token.Id))
+	common.ApiSuccess(c, gin.H{"group": nextGroup})
 }
 
 func GetAllTokens(c *gin.Context) {
