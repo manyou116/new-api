@@ -39,12 +39,23 @@ const ChatArea = ({
   onToggleDebugPanel,
   renderCustomChatContent,
   renderChatBoxAction,
+  actionCapabilities,
 }) => {
   const { t } = useTranslation();
+  const isImageComposer = actionCapabilities?.canGenerateImage;
 
-  const renderInputArea = React.useCallback((props) => {
-    return <CustomInputRender {...props} />;
-  }, []);
+  const renderInputArea = React.useCallback(
+    (props) => {
+      return (
+        <CustomInputRender
+          {...props}
+          actionCapabilities={actionCapabilities}
+          onSendWithAction={onMessageSend}
+        />
+      );
+    },
+    [actionCapabilities, onMessageSend],
+  );
 
   return (
     <Card
@@ -70,10 +81,12 @@ const ChatArea = ({
               </div>
               <div>
                 <Typography.Title heading={5} className='!text-white mb-0'>
-                  {t('AI 对话')}
+                  {isImageComposer ? t('图片创作') : t('AI 对话')}
                 </Typography.Title>
                 <Typography.Text className='!text-white/80 text-sm hidden sm:inline'>
-                  {inputs.model || t('选择模型开始对话')}
+                  {isImageComposer
+                    ? t('描述画面后点击生成图片')
+                    : inputs.model || t('选择模型开始对话')}
                 </Typography.Text>
               </div>
             </div>
@@ -119,7 +132,11 @@ const ChatArea = ({
           onStopGenerator={onStopGenerator}
           onClear={onClearMessages}
           className='h-full'
-          placeholder={t('请输入您的问题...')}
+          placeholder={
+            isImageComposer
+              ? t('描述你想生成的图片，例如：一只橘猫坐在赛博朋克街角，电影感，雨夜')
+              : t('请输入您的问题...')
+          }
         />
       </div>
     </Card>

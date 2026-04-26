@@ -18,11 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Modal, Typography, Card, Skeleton } from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
-import { CreditCard } from 'lucide-react';
-
-const { Text } = Typography;
+import { CreditCard, Loader2, X } from 'lucide-react';
 
 const PaymentConfirmModal = ({
   t,
@@ -35,6 +32,7 @@ const PaymentConfirmModal = ({
   amountLoading,
   renderAmount,
   payWay,
+  onPayWayChange,
   payMethods,
   // 新增：用于显示折扣明细
   amountNumber,
@@ -44,177 +42,162 @@ const PaymentConfirmModal = ({
     discountRate && discountRate > 0 && discountRate < 1 && amountNumber > 0;
   const originalAmount = hasDiscount ? amountNumber / discountRate : 0;
   const discountAmount = hasDiscount ? originalAmount - amountNumber : 0;
+  const renderPayMethodIcon = (payMethod, size = 16) => {
+    if (!payMethod) return null;
+    if (payMethod.type === 'alipay') {
+      return <SiAlipay size={size} color='#1677FF' />;
+    }
+    if (payMethod.type === 'wxpay') {
+      return <SiWechat size={size} color='#07C160' />;
+    }
+    if (payMethod.type === 'stripe') {
+      return <SiStripe size={size} color='#635BFF' />;
+    }
+    if (payMethod.icon) {
+      return (
+        <img
+          src={payMethod.icon}
+          alt={payMethod.name}
+          style={{ width: size, height: size, objectFit: 'contain' }}
+        />
+      );
+    }
+    return (
+      <CreditCard
+        size={size}
+        color={payMethod.color || 'var(--semi-color-text-2)'}
+      />
+    );
+  };
+
+  const canSwitchPayWay = !confirmLoading && !amountLoading;
+
+  if (!open) return null;
+
   return (
-    <Modal
-      title={
-        <div className='flex items-center'>
-          <CreditCard className='mr-2' size={18} />
-          {t('充值确认')}
+    <div className='fixed inset-0 z-[1000] flex items-center justify-center bg-black/45 px-4'>
+      <div className='w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-slate-900'>
+        <div className='flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800'>
+          <div className='flex items-center text-base font-semibold text-slate-900 dark:text-slate-100'>
+            <CreditCard className='mr-2' size={18} />
+            {t('充值确认')}
+          </div>
+          <button
+            type='button'
+            onClick={handleCancel}
+            disabled={confirmLoading}
+            className='rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-slate-800 dark:hover:text-slate-100'
+          >
+            <X size={18} />
+          </button>
         </div>
-      }
-      visible={open}
-      onOk={onlineTopUp}
-      onCancel={handleCancel}
-      maskClosable={false}
-      size='small'
-      centered
-      confirmLoading={confirmLoading}
-    >
-      <div className='space-y-4'>
-        <Card className='!rounded-xl !border-0 bg-slate-50 dark:bg-slate-800'>
-          <div className='space-y-3'>
-            <div className='flex justify-between items-center'>
-              <Text strong className='text-slate-700 dark:text-slate-200'>
+
+        <div className='px-5 py-5'>
+          <div className='rounded-xl bg-slate-50 p-4 dark:bg-slate-800'>
+            <div className='flex min-h-8 items-center justify-between'>
+              <span className='font-semibold text-slate-700 dark:text-slate-200'>
                 {t('充值数量')}：
-              </Text>
-              <Text className='text-slate-900 dark:text-slate-100'>
+              </span>
+              <span className='text-slate-900 dark:text-slate-100'>
                 {renderQuotaWithAmount(topUpCount)}
-              </Text>
+              </span>
             </div>
-            <div className='flex justify-between items-center'>
-              <Text strong className='text-slate-700 dark:text-slate-200'>
+            <div className='flex min-h-8 items-center justify-between'>
+              <span className='font-semibold text-slate-700 dark:text-slate-200'>
                 {t('实付金额')}：
-              </Text>
+              </span>
               {amountLoading ? (
-                <Skeleton.Title style={{ width: '60px', height: '16px' }} />
+                <span className='h-4 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-700' />
               ) : (
                 <div className='flex items-baseline space-x-2'>
-                  <Text strong className='font-bold' style={{ color: 'red' }}>
+                  <span className='font-bold text-red-600'>
                     {renderAmount()}
-                  </Text>
+                  </span>
                   {hasDiscount && (
-                    <Text size='small' className='text-rose-500'>
+                    <span className='text-xs text-rose-500'>
                       {Math.round(discountRate * 100)}%
-                    </Text>
+                    </span>
                   )}
                 </div>
               )}
             </div>
-            {hasDiscount && !amountLoading && (
-              <>
-                <div className='flex justify-between items-center'>
-                  <Text className='text-slate-500 dark:text-slate-400'>
+            <div className='min-h-[56px] space-y-2 pt-2'>
+              {hasDiscount && !amountLoading && (
+                <>
+                  <div className='flex items-center justify-between'>
+                    <span className='text-slate-500 dark:text-slate-400'>
                     {t('原价')}：
-                  </Text>
-                  <Text delete className='text-slate-500 dark:text-slate-400'>
+                    </span>
+                    <span className='text-slate-500 line-through dark:text-slate-400'>
                     {`${originalAmount.toFixed(2)} ${t('元')}`}
-                  </Text>
-                </div>
-                <div className='flex justify-between items-center'>
-                  <Text className='text-slate-500 dark:text-slate-400'>
+                    </span>
+                  </div>
+                  <div className='flex items-center justify-between'>
+                    <span className='text-slate-500 dark:text-slate-400'>
                     {t('优惠')}：
-                  </Text>
-                  <Text className='text-emerald-600 dark:text-emerald-400'>
+                    </span>
+                    <span className='text-emerald-600 dark:text-emerald-400'>
                     {`- ${discountAmount.toFixed(2)} ${t('元')}`}
-                  </Text>
-                </div>
-              </>
-            )}
-            <div className='flex justify-between items-center'>
-              <Text strong className='text-slate-700 dark:text-slate-200'>
-                {t('支付方式')}：
-              </Text>
-              <div className='flex items-center'>
-                {(() => {
-                  const payMethod = payMethods.find(
-                    (method) => method.type === payWay,
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className='space-y-2'>
+              <div className='font-semibold text-slate-700 dark:text-slate-200'>
+                {t('支付方式')}
+              </div>
+              <div className='grid grid-cols-2 gap-2'>
+                {(payMethods || []).map((method) => {
+                  const isActive = method.type === payWay;
+                  return (
+                    <button
+                      key={method.type}
+                      type='button'
+                      onClick={() => canSwitchPayWay && onPayWayChange?.(method.type)}
+                      disabled={!canSwitchPayWay}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-all ${
+                        isActive
+                          ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
+                      } ${!canSwitchPayWay ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                    >
+                      <span className='flex h-6 w-6 shrink-0 items-center justify-center'>
+                        {renderPayMethodIcon(method, 18)}
+                      </span>
+                      <span className='min-w-0 flex-1 truncate text-sm font-medium'>
+                        {method.name}
+                      </span>
+                    </button>
                   );
-                  if (payMethod) {
-                    return (
-                      <>
-                        {payMethod.type === 'alipay' ? (
-                          <SiAlipay
-                            className='mr-2'
-                            size={16}
-                            color='#1677FF'
-                          />
-                        ) : payMethod.type === 'wxpay' ? (
-                          <SiWechat
-                            className='mr-2'
-                            size={16}
-                            color='#07C160'
-                          />
-                        ) : payMethod.type === 'stripe' ? (
-                          <SiStripe
-                            className='mr-2'
-                            size={16}
-                            color='#635BFF'
-                          />
-                        ) : payMethod.icon ? (
-                          <img
-                            src={payMethod.icon}
-                            alt={payMethod.name}
-                            className='mr-2'
-                            style={{
-                              width: 16,
-                              height: 16,
-                              objectFit: 'contain',
-                            }}
-                          />
-                        ) : (
-                          <CreditCard
-                            className='mr-2'
-                            size={16}
-                            color={
-                              payMethod.color || 'var(--semi-color-text-2)'
-                            }
-                          />
-                        )}
-                        <Text className='text-slate-900 dark:text-slate-100'>
-                          {payMethod.name}
-                        </Text>
-                      </>
-                    );
-                  } else {
-                    // 默认充值方式
-                    if (payWay === 'alipay') {
-                      return (
-                        <>
-                          <SiAlipay
-                            className='mr-2'
-                            size={16}
-                            color='#1677FF'
-                          />
-                          <Text className='text-slate-900 dark:text-slate-100'>
-                            {t('支付宝')}
-                          </Text>
-                        </>
-                      );
-                    } else if (payWay === 'stripe') {
-                      return (
-                        <>
-                          <SiStripe
-                            className='mr-2'
-                            size={16}
-                            color='#635BFF'
-                          />
-                          <Text className='text-slate-900 dark:text-slate-100'>
-                            Stripe
-                          </Text>
-                        </>
-                      );
-                    } else {
-                      return (
-                        <>
-                          <SiWechat
-                            className='mr-2'
-                            size={16}
-                            color='#07C160'
-                          />
-                          <Text className='text-slate-900 dark:text-slate-100'>
-                            {t('微信')}
-                          </Text>
-                        </>
-                      );
-                    }
-                  }
-                })()}
+                })}
               </div>
             </div>
           </div>
-        </Card>
+
+          <div className='mt-5 flex justify-end gap-3'>
+            <button
+              type='button'
+              onClick={handleCancel}
+              disabled={confirmLoading}
+              className='rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800'
+            >
+              {t('取消')}
+            </button>
+            <button
+              type='button'
+              onClick={onlineTopUp}
+              disabled={confirmLoading || amountLoading}
+              className='inline-flex min-w-24 items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70'
+            >
+              {confirmLoading && <Loader2 className='mr-2 animate-spin' size={16} />}
+              {t('确认支付')}
+            </button>
+          </div>
+        </div>
       </div>
-    </Modal>
+    </div>
   );
 };
 

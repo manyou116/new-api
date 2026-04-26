@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useRef, useEffect } from 'react';
-import { Typography, TextArea, Button } from '@douyinfe/semi-ui';
+import React, { useRef, useEffect, useState } from 'react';
+import { Typography, TextArea, Button, ImagePreview } from '@douyinfe/semi-ui';
 import MarkdownRenderer from '../common/markdown/MarkdownRenderer';
 import ThinkingContent from './ThinkingContent';
 import { Loader2, Check, X, Settings, AlertTriangle } from 'lucide-react';
@@ -39,6 +39,8 @@ const MessageContent = ({
   const { t } = useTranslation();
   const previousContentLengthRef = useRef(0);
   const lastContentRef = useRef('');
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewVisible, setPreviewVisible] = useState(false);
 
   const isThinkingStatus =
     message.status === 'loading' || message.status === 'incomplete';
@@ -302,6 +304,10 @@ const MessageContent = ({
             const imageContents = message.content.filter(
               (item) => item.type === 'image_url',
             );
+            const getImageSrc = (item) =>
+              typeof item.image_url === 'string'
+                ? item.image_url
+                : item.image_url?.url;
 
             return (
               <div>
@@ -310,10 +316,18 @@ const MessageContent = ({
                     {imageContents.map((imgItem, index) => (
                       <div key={index} className='max-w-sm'>
                         <img
-                          src={imgItem.image_url.url}
-                          alt={`用户上传的图片 ${index + 1}`}
-                          className='rounded-lg max-w-full h-auto shadow-sm border'
+                          src={getImageSrc(imgItem)}
+                          alt={
+                            message.role === 'assistant'
+                              ? `生成的图片 ${index + 1}`
+                              : `用户上传的图片 ${index + 1}`
+                          }
+                          className='rounded-lg max-w-full h-auto shadow-sm border cursor-zoom-in transition-opacity hover:opacity-90'
                           style={{ maxHeight: '300px' }}
+                          onClick={() => {
+                            setPreviewUrl(getImageSrc(imgItem));
+                            setPreviewVisible(true);
+                          }}
                           onError={(e) => {
                             e.target.style.display = 'none';
                             e.target.nextSibling.style.display = 'block';
@@ -323,12 +337,17 @@ const MessageContent = ({
                           className='text-red-500 text-sm p-2 bg-red-50 rounded-lg border border-red-200'
                           style={{ display: 'none' }}
                         >
-                          图片加载失败: {imgItem.image_url.url}
+                          图片加载失败: {getImageSrc(imgItem)}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
+                <ImagePreview
+                  src={previewUrl}
+                  visible={previewVisible}
+                  onVisibleChange={setPreviewVisible}
+                />
 
                 {textContent &&
                   textContent.text &&

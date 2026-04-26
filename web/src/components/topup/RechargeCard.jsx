@@ -30,9 +30,9 @@ import {
   Row,
   Col,
   Spin,
-  Tooltip,
   Tabs,
   TabPane,
+  Tag,
 } from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
 import {
@@ -90,6 +90,8 @@ const RechargeCard = ({
   enableWaffoPancakeTopUp,
   subscriptionLoading = false,
   subscriptionPlans = [],
+  initialTab = null,
+  initialPlanId = null,
   billingPreference,
   onChangeBillingPreference,
   activeSubscriptions = [],
@@ -111,15 +113,25 @@ const RechargeCard = ({
   useEffect(() => {
     if (initialTabSetRef.current) return;
     if (subscriptionLoading) return;
-    setActiveTab(shouldShowSubscription ? 'subscription' : 'topup');
+    const requestedTab = initialTab === 'subscription' || initialTab === 'topup' ? initialTab : null;
+    if (requestedTab === 'subscription' && shouldShowSubscription) {
+      setActiveTab('subscription');
+    } else if (requestedTab === 'topup') {
+      setActiveTab('topup');
+    } else if (initialPlanId && shouldShowSubscription) {
+      setActiveTab('subscription');
+    } else {
+      setActiveTab('topup');
+    }
     initialTabSetRef.current = true;
-  }, [shouldShowSubscription, subscriptionLoading]);
+  }, [initialPlanId, initialTab, shouldShowSubscription, subscriptionLoading]);
 
   useEffect(() => {
     if (!shouldShowSubscription && activeTab !== 'topup') {
       setActiveTab('topup');
     }
   }, [shouldShowSubscription, activeTab]);
+
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
       {/* 统计数据 */}
@@ -328,13 +340,19 @@ const RechargeCard = ({
                               (!enableWaffoPancakeTopUp && isWaffoPancake) ||
                               minTopupVal > Number(topUpCount || 0);
 
-                            const buttonEl = (
+                            const disabledReason =
+                              disabled && minTopupVal > Number(topUpCount || 0)
+                                ? t('此支付方式最低充值金额为') + ' ' + minTopupVal
+                                : undefined;
+
+                            return (
                               <Button
                                 key={payMethod.type}
                                 theme='outline'
                                 type='tertiary'
                                 onClick={() => preTopUp(payMethod.type)}
                                 disabled={disabled}
+                                title={disabledReason}
                                 loading={
                                   paymentLoading && payWay === payMethod.type
                                 }
@@ -374,24 +392,6 @@ const RechargeCard = ({
                               >
                                 {payMethod.name}
                               </Button>
-                            );
-
-                            return disabled &&
-                              minTopupVal > Number(topUpCount || 0) ? (
-                              <Tooltip
-                                content={
-                                  t('此支付方式最低充值金额为') +
-                                  ' ' +
-                                  minTopupVal
-                                }
-                                key={payMethod.type}
-                              >
-                                {buttonEl}
-                              </Tooltip>
-                            ) : (
-                              <React.Fragment key={payMethod.type}>
-                                {buttonEl}
-                              </React.Fragment>
                             );
                           })}
                         </Space>
@@ -481,10 +481,6 @@ const RechargeCard = ({
                           bodyStyle={{ padding: '12px' }}
                           onClick={() => {
                             selectPresetAmount(preset);
-                            onlineFormApiRef.current?.setValue(
-                              'topUpCount',
-                              preset.value,
-                            );
                           }}
                         >
                           <div style={{ textAlign: 'center' }}>
@@ -662,6 +658,7 @@ const RechargeCard = ({
                 t={t}
                 loading={subscriptionLoading}
                 plans={subscriptionPlans}
+                initialPlanId={initialPlanId}
                 payMethods={payMethods}
                 enableOnlineTopUp={enableOnlineTopUp}
                 enableStripeTopUp={enableStripeTopUp}

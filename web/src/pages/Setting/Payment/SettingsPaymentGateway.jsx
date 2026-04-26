@@ -38,6 +38,10 @@ export default function SettingsPaymentGateway(props) {
     EpayKey: '',
     Price: 7.3,
     MinTopUp: 1,
+    AlipayAppId: '',
+    AlipayPrivateKey: '',
+    AlipayPublicKey: '',
+    AlipayProduction: false,
   });
   const formApiRef = useRef(null);
 
@@ -47,6 +51,10 @@ export default function SettingsPaymentGateway(props) {
         PayAddress: props.options.PayAddress || '',
         EpayId: props.options.EpayId || '',
         EpayKey: props.options.EpayKey || '',
+        AlipayAppId: props.options.AlipayAppId || '',
+        AlipayPrivateKey: props.options.AlipayPrivateKey || '',
+        AlipayPublicKey: props.options.AlipayPublicKey || '',
+        AlipayProduction: props.options.AlipayProduction === 'true',
         Price:
           props.options.Price !== undefined
             ? parseFloat(props.options.Price)
@@ -90,6 +98,16 @@ export default function SettingsPaymentGateway(props) {
       if (inputs.MinTopUp !== '') {
         options.push({ key: 'MinTopUp', value: inputs.MinTopUp.toString() });
       }
+      if (inputs.AlipayAppId !== '') {
+        options.push({ key: 'AlipayAppId', value: inputs.AlipayAppId });
+      }
+      if (inputs.AlipayPrivateKey !== '') {
+        options.push({ key: 'AlipayPrivateKey', value: inputs.AlipayPrivateKey });
+      }
+      if (inputs.AlipayPublicKey !== '') {
+        options.push({ key: 'AlipayPublicKey', value: inputs.AlipayPublicKey });
+      }
+      options.push({ key: 'AlipayProduction', value: inputs.AlipayProduction ? 'true' : 'false' });
 
       const requestQueue = options.map((opt) =>
         API.put('/api/option/', {
@@ -127,7 +145,7 @@ export default function SettingsPaymentGateway(props) {
             type='info'
             icon={<Info size={16} />}
             description={t(
-              '当前仅支持易支付接口，回调地址请在通用设置中配置。',
+              '支持易支付与支付宝原生支付，回调地址基于通用设置中的服务器地址生成。',
             )}
             style={{ marginBottom: 16 }}
           />
@@ -178,6 +196,49 @@ export default function SettingsPaymentGateway(props) {
           <Button onClick={submitPayAddress} style={{ marginTop: 16 }}>
             {t('更新易支付设置')}
           </Button>
+        </Form.Section>
+
+        {/* ── 支付宝原生 SDK 设置 ── */}
+        <Form.Section text={t('支付宝原生支付设置')}>
+          <Banner
+            type='info'
+            icon={<Info size={16} />}
+            description={t('填写支付宝开放平台的应用参数，启用后用户可直接跳转支付宝付款页面。留空则不启用。')}
+            style={{ marginBottom: 16 }}
+          />
+          <Row gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}>
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Input
+                field='AlipayAppId'
+                label={t('支付宝 App ID')}
+                placeholder={t('例如：2021000000000000')}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Input
+                field='AlipayPrivateKey'
+                label={t('应用私钥 (RSA2)')}
+                placeholder={t('敏感信息不会发送到前端显示')}
+                type='password'
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Input
+                field='AlipayPublicKey'
+                label={t('支付宝公钥')}
+                placeholder={t('支付宝开放平台生成的公钥')}
+                type='password'
+              />
+            </Col>
+          </Row>
+          <Row gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }} style={{ marginTop: 12 }}>
+            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+              <Form.Switch
+                field='AlipayProduction'
+                label={t('生产模式（关闭为沙箱模式）')}
+              />
+            </Col>
+          </Row>
         </Form.Section>
       </Form>
     </Spin>
