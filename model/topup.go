@@ -26,6 +26,7 @@ type TopUp struct {
 const (
 	PaymentMethodStripe       = "stripe"
 	PaymentMethodCreem        = "creem"
+	PaymentMethodAlipayNative = "alipay_native"
 	PaymentMethodWaffo        = "waffo"
 	PaymentMethodWaffoPancake = "waffo_pancake"
 )
@@ -93,6 +94,79 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentMethod string, targ
 		topUp.Status = targetStatus
 		return tx.Save(topUp).Error
 	})
+}
+
+func CompleteTopUpPayment(tradeNo string, expectedPaymentMethod string, callbackPaymentMethod string, callerIp string) error {
+	if tradeNo == "" {
+		return errors.New("未提供订单号")
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+
+	var userId int
+	var quotaToAdd int
+	var payMoney float64
+	var paymentMethod string
+	completed := false
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+
+		if expectedPaymentMethod != "" && topUp.PaymentMethod != expectedPaymentMethod {
+			return ErrPaymentMethodMismatch
+		}
+
+		if topUp.Status == common.TopUpStatusSuccess {
+			return nil
+		}
+
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		if topUp.PaymentMethod == PaymentMethodStripe {
+			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
+		} else {
+			dAmount := decimal.NewFromInt(topUp.Amount)
+			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+			quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+		}
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+			return err
+		}
+
+		userId = topUp.UserId
+		payMoney = topUp.Money
+		paymentMethod = topUp.PaymentMethod
+		completed = true
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if completed {
+		RecordTopupLog(userId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, callbackPaymentMethod)
+	}
+	return nil
 }
 
 func Recharge(referenceId string, customerId string, callerIp string) (err error) {

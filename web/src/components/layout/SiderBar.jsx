@@ -514,7 +514,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
               />
             }
             onClick={toggleCollapsed}
-            iconOnly={collapsed}
+            aria-label={collapsed ? t('展开侧边栏') : undefined}
             style={
               collapsed
                 ? { width: 36, height: 24, padding: 0 }

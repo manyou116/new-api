@@ -175,6 +175,15 @@ const PaymentSetting = () => {
                 options={inputs}
                 refresh={onRefresh}
                 hideSectionTitle
+                gateway='epay'
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('支付宝原生设置')} itemKey='alipay-native'>
+              <SettingsPaymentGateway
+                options={inputs}
+                refresh={onRefresh}
+                hideSectionTitle
+                gateway='alipay'
               />
             </Tabs.TabPane>
             <Tabs.TabPane tab={t('Stripe 设置')} itemKey='stripe'>
