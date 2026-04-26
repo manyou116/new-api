@@ -54,6 +54,7 @@ const { Text } = Typography;
 const RechargeCard = ({
   t,
   enableOnlineTopUp,
+  enableAlipayNativeTopUp,
   enableStripeTopUp,
   enableCreemTopUp,
   creemProducts,
@@ -109,6 +110,21 @@ const RechargeCard = ({
     activeSubscriptions.length > 0 ||
     allSubscriptions.length > 0;
   const regularPayMethods = payMethods || [];
+  const isPayMethodChannelEnabled = (payMethod) => {
+    const type = payMethod?.type;
+    const isStripe = type === 'stripe';
+    const isAlipayNative = type === 'alipay_native';
+    const isWaffo = typeof type === 'string' && type.startsWith('waffo:');
+    const isWaffoPancake = type === 'waffo_pancake';
+
+    if (isAlipayNative) return enableAlipayNativeTopUp;
+    if (isStripe) return enableStripeTopUp;
+    if (isWaffo) return enableWaffoTopUp;
+    if (isWaffoPancake) return enableWaffoPancakeTopUp;
+    return enableOnlineTopUp;
+  };
+  const enabledPayMethods = regularPayMethods.filter(isPayMethodChannelEnabled);
+  const paymentMethodCount = enabledPayMethods.length;
 
   useEffect(() => {
     if (initialTabSetRef.current) return;
@@ -242,6 +258,7 @@ const RechargeCard = ({
             <Spin size='large' />
           </div>
         ) : enableOnlineTopUp ||
+          enableAlipayNativeTopUp ||
           enableStripeTopUp ||
           enableCreemTopUp ||
           enableWaffoTopUp ||
@@ -251,23 +268,79 @@ const RechargeCard = ({
             initValues={{ topUpCount: topUpCount }}
           >
             <div className='space-y-6'>
+              <div className='rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60'>
+                <div className='mb-3 flex items-center justify-between gap-3'>
+                  <div>
+                    <div className='text-sm font-semibold text-slate-900 dark:text-slate-100'>
+                      {t('购买按量额度')}
+                    </div>
+                    <div className='mt-1 text-xs text-slate-500 dark:text-slate-400'>
+                      {t('充值后进入账户余额，按实际调用消耗')}
+                    </div>
+                  </div>
+                  <Tag color='blue' prefixIcon={<Wallet size={12} />}>
+                    {t('余额可用')}
+                  </Tag>
+                </div>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
+                  <div className='rounded-lg bg-white p-3 dark:bg-slate-900'>
+                    <div className='mb-1 text-xs text-slate-500 dark:text-slate-400'>
+                      {t('预计到账')}
+                    </div>
+                    <div className='text-base font-semibold text-slate-900 dark:text-slate-100'>
+                      {renderQuotaWithAmount(topUpCount)}
+                    </div>
+                  </div>
+                  <div className='rounded-lg bg-white p-3 dark:bg-slate-900'>
+                    <div className='mb-1 text-xs text-slate-500 dark:text-slate-400'>
+                      {t('预计支付')}
+                    </div>
+                    <Skeleton
+                      loading={showAmountSkeleton}
+                      active
+                      placeholder={
+                        <Skeleton.Title
+                          style={{ width: 92, height: 20, borderRadius: 6 }}
+                        />
+                      }
+                    >
+                      <div className='text-base font-semibold text-rose-600'>
+                        {renderAmount()}
+                      </div>
+                    </Skeleton>
+                  </div>
+                  <div className='rounded-lg bg-white p-3 dark:bg-slate-900'>
+                    <div className='mb-1 text-xs text-slate-500 dark:text-slate-400'>
+                      {t('可用支付方式')}
+                    </div>
+                    <div className='text-base font-semibold text-slate-900 dark:text-slate-100'>
+                      {paymentMethodCount > 0
+                        ? `${paymentMethodCount} ${t('种')}`
+                        : t('暂无')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {(enableOnlineTopUp ||
+                enableAlipayNativeTopUp ||
                 enableStripeTopUp ||
                 enableWaffoTopUp ||
                 enableWaffoPancakeTopUp) && (
                 <Row gutter={12}>
-                  <Col xs={24} sm={24} md={24} lg={10} xl={10}>
+                  <Col xs={24} sm={24} md={24} lg={24} xl={24}>
                     <Form.InputNumber
                       field='topUpCount'
-                      label={t('充值数量')}
+                      label={t('自定义额度')}
                       disabled={
                         !enableOnlineTopUp &&
+                        !enableAlipayNativeTopUp &&
                         !enableStripeTopUp &&
                         !enableWaffoTopUp &&
                         !enableWaffoPancakeTopUp
                       }
                       placeholder={
-                        t('充值数量，最低 ') + renderQuotaWithAmount(minTopUp)
+                        t('输入想购买的额度，最低 ') + renderQuotaWithAmount(minTopUp)
                       }
                       value={topUpCount}
                       min={minTopUp}
@@ -307,7 +380,7 @@ const RechargeCard = ({
                           }
                         >
                           <Text type='secondary' className='text-red-600'>
-                            {t('实付金额：')}
+                            {t('预计支付：')}
                             <span style={{ color: 'red' }}>
                               {renderAmount()}
                             </span>
@@ -317,95 +390,20 @@ const RechargeCard = ({
                       style={{ width: '100%' }}
                     />
                   </Col>
-                  {regularPayMethods.length > 0 && (
-                    <Col xs={24} sm={24} md={24} lg={14} xl={14}>
-                      <Form.Slot label={t('选择支付方式')}>
-                        <Space wrap>
-                          {regularPayMethods.map((payMethod) => {
-                            const minTopupVal =
-                              Number(payMethod.min_topup) || 0;
-                            const isStripe = payMethod.type === 'stripe';
-                            const isWaffo =
-                              typeof payMethod.type === 'string' &&
-                              payMethod.type.startsWith('waffo:');
-                            const isWaffoPancake =
-                              payMethod.type === 'waffo_pancake';
-                            const disabled =
-                              (!enableOnlineTopUp &&
-                                !isStripe &&
-                                !isWaffo &&
-                                !isWaffoPancake) ||
-                              (!enableStripeTopUp && isStripe) ||
-                              (!enableWaffoTopUp && isWaffo) ||
-                              (!enableWaffoPancakeTopUp && isWaffoPancake) ||
-                              minTopupVal > Number(topUpCount || 0);
-
-                            const disabledReason =
-                              disabled && minTopupVal > Number(topUpCount || 0)
-                                ? t('此支付方式最低充值金额为') + ' ' + minTopupVal
-                                : undefined;
-
-                            return (
-                              <Button
-                                key={payMethod.type}
-                                theme='outline'
-                                type='tertiary'
-                                onClick={() => preTopUp(payMethod.type)}
-                                disabled={disabled}
-                                title={disabledReason}
-                                loading={
-                                  paymentLoading && payWay === payMethod.type
-                                }
-                                icon={
-                                  payMethod.type === 'alipay' ? (
-                                    <SiAlipay size={18} color='#1677FF' />
-                                  ) : payMethod.type === 'wxpay' ? (
-                                    <SiWechat size={18} color='#07C160' />
-                                  ) : payMethod.type === 'stripe' ? (
-                                    <SiStripe size={18} color='#635BFF' />
-                                  ) : payMethod.icon ? (
-                                    <img
-                                      src={payMethod.icon}
-                                      alt={payMethod.name}
-                                      style={{
-                                        width: 18,
-                                        height: 18,
-                                        objectFit: 'contain',
-                                      }}
-                                    />
-                                  ) : payMethod.type === 'waffo_pancake' ? (
-                                    <CreditCard
-                                      size={18}
-                                      color='var(--semi-color-primary)'
-                                    />
-                                  ) : (
-                                    <CreditCard
-                                      size={18}
-                                      color={
-                                        payMethod.color ||
-                                        'var(--semi-color-text-2)'
-                                      }
-                                    />
-                                  )
-                                }
-                                className='!rounded-lg !px-4 !py-2'
-                              >
-                                {payMethod.name}
-                              </Button>
-                            );
-                          })}
-                        </Space>
-                      </Form.Slot>
-                    </Col>
-                  )}
                 </Row>
               )}
 
-              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp) && (
+              {(enableOnlineTopUp ||
+                enableAlipayNativeTopUp ||
+                enableStripeTopUp ||
+                enableWaffoTopUp) && (
                 <Form.Slot
                   label={
                     <div className='flex items-center gap-2'>
-                      <span>{t('选择充值额度')}</span>
+                      <span className='inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1.5 text-xs font-semibold text-white dark:bg-slate-100 dark:text-slate-900'>
+                        1
+                      </span>
+                      <span>{t('选择购买额度')}</span>
                       {(() => {
                         const { symbol, rate, type } = getCurrencyConfig();
                         if (type === 'USD') return null;
@@ -509,7 +507,7 @@ const RechargeCard = ({
                                 margin: '4px 0',
                               }}
                             >
-                              {t('实付')} {symbol}
+                              {t('支付')} {symbol}
                               {displayActualPay.toFixed(2)}，
                               {hasDiscount
                                 ? `${t('节省')} ${symbol}${displaySave.toFixed(2)}`
@@ -517,6 +515,68 @@ const RechargeCard = ({
                             </div>
                           </div>
                         </Card>
+                      );
+                    })}
+                  </div>
+                </Form.Slot>
+              )}
+
+              {enabledPayMethods.length > 0 && (
+                <Form.Slot
+                  label={
+                    <div className='flex items-center gap-2'>
+                      <span className='inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-xs font-semibold text-white'>
+                        2
+                      </span>
+                      <span>{t('选择付款方式')}</span>
+                    </div>
+                  }
+                >
+                  <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'>
+                    {enabledPayMethods.map((payMethod) => {
+                      const minTopupVal = Number(payMethod.min_topup) || 0;
+                      const disabled = minTopupVal > Number(topUpCount || 0);
+                      const disabledReason =
+                        disabled && minTopupVal > Number(topUpCount || 0)
+                          ? t('此支付方式最低充值金额为') + ' ' + minTopupVal
+                          : undefined;
+
+                      return (
+                        <Button
+                          key={payMethod.type}
+                          theme='solid'
+                          type='primary'
+                          onClick={() => preTopUp(payMethod.type)}
+                          disabled={disabled}
+                          title={disabledReason}
+                          loading={paymentLoading && payWay === payMethod.type}
+                          icon={
+                            payMethod.type === 'alipay' ||
+                            payMethod.type === 'alipay_native' ? (
+                              <SiAlipay size={18} color='currentColor' />
+                            ) : payMethod.type === 'wxpay' ? (
+                              <SiWechat size={18} color='currentColor' />
+                            ) : payMethod.type === 'stripe' ? (
+                              <SiStripe size={18} color='currentColor' />
+                            ) : payMethod.icon ? (
+                              <img
+                                src={payMethod.icon}
+                                alt={payMethod.name}
+                                style={{
+                                  width: 18,
+                                  height: 18,
+                                  objectFit: 'contain',
+                                }}
+                              />
+                            ) : (
+                              <CreditCard size={18} />
+                            )
+                          }
+                          className='!h-11 !rounded-lg !px-4'
+                          block
+                        >
+                          {payMethod.name}
+                        </Button>
                       );
                     })}
                   </div>
@@ -538,7 +598,7 @@ const RechargeCard = ({
                           {product.name}
                         </div>
                         <div className='text-sm text-gray-600 mb-2'>
-                          {t('充值额度')}: {product.quota}
+                          {t('到账额度')}: {product.quota}
                         </div>
                         <div className='text-lg font-semibold text-blue-600'>
                           {product.currency === 'EUR' ? '€' : '$'}
@@ -555,7 +615,7 @@ const RechargeCard = ({
           <Banner
             type='info'
             description={t(
-              '管理员未开启在线充值功能，请联系管理员开启或使用兑换码充值。',
+                '管理员未开启任何在线购买渠道，请联系管理员开启或使用兑换码充值。',
             )}
             className='!rounded-xl'
             closeIcon={null}
@@ -628,9 +688,9 @@ const RechargeCard = ({
           </Avatar>
           <div>
             <Typography.Text className='text-lg font-medium'>
-              {t('账户充值')}
+              {t('钱包管理')}
             </Typography.Text>
-            <div className='text-xs'>{t('多种充值方式，安全便捷')}</div>
+            <div className='text-xs'>{t('订阅套餐与按量额度统一管理')}</div>
           </div>
         </div>
         <Button
@@ -676,7 +736,7 @@ const RechargeCard = ({
             tab={
               <div className='flex items-center gap-2'>
                 <Wallet size={16} />
-                {t('额度充值')}
+                {t('按量额度')}
               </div>
             }
             itemKey='topup'

@@ -58,6 +58,7 @@ const TopUp = () => {
   const [enableOnlineTopUp, setEnableOnlineTopUp] = useState(
     statusState?.status?.enable_online_topup || false,
   );
+  const [enableAlipayNativeTopUp, setEnableAlipayNativeTopUp] = useState(false);
   const [priceRatio, setPriceRatio] = useState(statusState?.status?.price || 1);
 
   const [enableStripeTopUp, setEnableStripeTopUp] = useState(
@@ -116,7 +117,7 @@ const TopUp = () => {
   });
   const [topupInfoLoaded, setTopupInfoLoaded] = useState(false);
 
-  const confirmPayMethods = [
+  const allConfirmPayMethods = [
     ...payMethods,
     ...waffoPayMethods.map((method, index) => ({
       ...method,
@@ -125,6 +126,20 @@ const TopUp = () => {
       color: method.color || 'rgba(var(--semi-primary-5), 1)',
     })),
   ];
+
+  const isPaymentEnabled = (payment) => {
+    if (payment === 'alipay_native') return enableAlipayNativeTopUp;
+    if (payment === 'stripe') return enableStripeTopUp;
+    if (payment === 'waffo_pancake') return enableWaffoPancakeTopUp;
+    if (typeof payment === 'string' && payment.startsWith('waffo:')) {
+      return enableWaffoTopUp;
+    }
+    return enableOnlineTopUp;
+  };
+
+  const confirmPayMethods = allConfirmPayMethods.filter((method) =>
+    method?.type ? isPaymentEnabled(method.type) : false,
+  );
 
   const getPayMethodConfig = (payment) =>
     confirmPayMethods.find((method) => method.type === payment);
@@ -144,26 +159,17 @@ const TopUp = () => {
     return Math.max(Math.ceil(rawAmount), minAmount);
   };
 
-  const requestAmountByPayment = async (payment, value) => {
+  const requestAmountByPayment = async (payment, value, options = {}) => {
     if (payment === 'stripe') {
-      return getStripeAmount(value);
+      return getStripeAmount(value, options);
     }
     if (payment === 'waffo_pancake') {
-      return getWaffoPancakeAmount(value);
+      return getWaffoPancakeAmount(value, options);
     }
     if (typeof payment === 'string' && payment.startsWith('waffo:')) {
-      return getWaffoAmount(value);
+      return getWaffoAmount(value, options);
     }
-    return getAmount(value);
-  };
-
-  const isPaymentEnabled = (payment) => {
-    if (payment === 'stripe') return enableStripeTopUp;
-    if (payment === 'waffo_pancake') return enableWaffoPancakeTopUp;
-    if (typeof payment === 'string' && payment.startsWith('waffo:')) {
-      return enableWaffoTopUp;
-    }
-    return enableOnlineTopUp;
+    return getAmount(value, options);
   };
 
   const pickAutoCheckoutPayment = () => {
@@ -233,6 +239,11 @@ const TopUp = () => {
         showError(t('管理员未开启 Waffo 充值！'));
         return;
       }
+    } else if (payment === 'alipay_native') {
+      if (!enableAlipayNativeTopUp) {
+        showError(t('管理员未开启支付宝原生充值！'));
+        return;
+      }
     } else {
       if (!enableOnlineTopUp) {
         showError(t('管理员未开启在线充值！'));
@@ -247,7 +258,7 @@ const TopUp = () => {
       await requestAmountByPayment(payment);
 
       if (topUpCount < selectedMinTopUp) {
-        showError(t('充值数量不能小于') + selectedMinTopUp);
+        showError(t('购买额度不能小于') + selectedMinTopUp);
         return;
       }
       setOpen(true);
@@ -266,7 +277,7 @@ const TopUp = () => {
     }
     const selectedMinTopUp = getPaymentMinTopUp(payment);
     if (topUpCount < selectedMinTopUp) {
-      showError(t('充值数量不能小于') + selectedMinTopUp);
+      showError(t('购买额度不能小于') + selectedMinTopUp);
       return;
     }
     setPayWay(payment);
@@ -314,7 +325,7 @@ const TopUp = () => {
     }
 
     if (topUpCount < minTopUp) {
-      showError('充值数量不能小于' + minTopUp);
+      showError(t('购买额度不能小于') + minTopUp);
       return;
     }
     setConfirmLoading(true);
@@ -436,7 +447,7 @@ const TopUp = () => {
   const waffoTopUp = async (payMethodIndex) => {
     try {
       if (topUpCount < waffoMinTopUp) {
-        showError(t('充值数量不能小于') + waffoMinTopUp);
+        showError(t('购买额度不能小于') + waffoMinTopUp);
         return;
       }
       setPaymentLoading(true);
@@ -464,7 +475,7 @@ const TopUp = () => {
     }
   };
 
-  const getWaffoAmount = async (value) => {
+  const getWaffoAmount = async (value, options = {}) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -479,7 +490,9 @@ const TopUp = () => {
           setAmount(parseFloat(data));
         } else {
           setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          if (!options.silent) {
+            Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          }
         }
       } else {
         showError(res);
@@ -494,7 +507,7 @@ const TopUp = () => {
   const waffoPancakeTopUp = async () => {
     const minTopUpValue = Number(waffoPancakeMinTopUp || 1);
     if (topUpCount < minTopUpValue) {
-      showError(t('充值数量不能小于') + minTopUpValue);
+      showError(t('购买额度不能小于') + minTopUpValue);
       return;
     }
 
@@ -527,7 +540,7 @@ const TopUp = () => {
     }
   };
 
-  const getWaffoPancakeAmount = async (value) => {
+  const getWaffoPancakeAmount = async (value, options = {}) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -542,7 +555,9 @@ const TopUp = () => {
           setAmount(parseFloat(data));
         } else {
           setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          if (!options.silent) {
+            Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          }
         }
       } else {
         showError(res);
@@ -685,15 +700,16 @@ const TopUp = () => {
 
           // 如果启用了 Stripe 支付，添加到支付方法列表
           // 这个逻辑现在由后端处理，如果 Stripe 启用，后端会在 pay_methods 中包含它
-
           setPayMethods(payMethods);
           const enableStripeTopUp = data.enable_stripe_topup || false;
           const enableOnlineTopUp = data.enable_online_topup || false;
+          const enableAlipayNativeTopUp =
+            data.enable_alipay_native_topup || false;
           const enableCreemTopUp = data.enable_creem_topup || false;
           const enableWaffoTopUp = data.enable_waffo_topup || false;
           const enableWaffoPancakeTopUp =
             data.enable_waffo_pancake_topup || false;
-          const minTopUpValue = enableOnlineTopUp
+          const minTopUpValue = enableOnlineTopUp || enableAlipayNativeTopUp
             ? data.min_topup
             : enableStripeTopUp
               ? data.stripe_min_topup
@@ -703,6 +719,7 @@ const TopUp = () => {
                   ? data.waffo_pancake_min_topup
                 : 1;
           setEnableOnlineTopUp(enableOnlineTopUp);
+          setEnableAlipayNativeTopUp(enableAlipayNativeTopUp);
           setEnableStripeTopUp(enableStripeTopUp);
           setEnableCreemTopUp(enableCreemTopUp);
           setEnableWaffoTopUp(enableWaffoTopUp);
@@ -728,7 +745,7 @@ const TopUp = () => {
           }
 
           // 初始化显示实付金额
-          getAmount(initialTopUpAmount);
+          getAmount(initialTopUpAmount, { silent: true });
         } catch (e) {
           setPayMethods([]);
         }
@@ -844,6 +861,7 @@ const TopUp = () => {
     preTopUp(payment.type);
   }, [
     enableOnlineTopUp,
+    enableAlipayNativeTopUp,
     enableStripeTopUp,
     enableWaffoTopUp,
     enableWaffoPancakeTopUp,
@@ -861,7 +879,7 @@ const TopUp = () => {
     return amount + ' ' + t('元');
   };
 
-  const getAmount = async (value) => {
+  const getAmount = async (value, options = {}) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -876,7 +894,9 @@ const TopUp = () => {
           setAmount(parseFloat(data));
         } else {
           setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          if (!options.silent) {
+            Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          }
         }
       } else {
         showError(res);
@@ -887,7 +907,7 @@ const TopUp = () => {
     setAmountLoading(false);
   };
 
-  const getStripeAmount = async (value) => {
+  const getStripeAmount = async (value, options = {}) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -902,7 +922,9 @@ const TopUp = () => {
           setAmount(parseFloat(data));
         } else {
           setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          if (!options.silent) {
+            Toast.error({ content: '错误：' + data, id: 'getAmount' });
+          }
         }
       } else {
         showError(res);
@@ -1032,6 +1054,7 @@ const TopUp = () => {
         <RechargeCard
           t={t}
           enableOnlineTopUp={enableOnlineTopUp}
+          enableAlipayNativeTopUp={enableAlipayNativeTopUp}
           enableStripeTopUp={enableStripeTopUp}
           enableCreemTopUp={enableCreemTopUp}
           creemProducts={creemProducts}

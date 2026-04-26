@@ -35,6 +35,8 @@ export default function SettingsGeneralPayment(props) {
   const [inputs, setInputs] = useState({
     ServerAddress: '',
     CustomCallbackAddress: '',
+    Price: 7.3,
+    MinTopUp: 1,
     TopupGroupRatio: '',
     PayMethods: '',
     AmountOptions: '',
@@ -48,6 +50,14 @@ export default function SettingsGeneralPayment(props) {
       const currentInputs = {
         ServerAddress: props.options.ServerAddress || '',
         CustomCallbackAddress: props.options.CustomCallbackAddress || '',
+        Price:
+          props.options.Price !== undefined
+            ? parseFloat(props.options.Price)
+            : 7.3,
+        MinTopUp:
+          props.options.MinTopUp !== undefined
+            ? parseFloat(props.options.MinTopUp)
+            : 1,
         TopupGroupRatio: props.options.TopupGroupRatio || '',
         PayMethods: props.options.PayMethods || '',
         AmountOptions: props.options.AmountOptions || '',
@@ -113,6 +123,12 @@ export default function SettingsGeneralPayment(props) {
           value: removeTrailingSlash(inputs.CustomCallbackAddress),
         });
       }
+      if (inputs.Price !== '') {
+        options.push({ key: 'Price', value: inputs.Price.toString() });
+      }
+      if (inputs.MinTopUp !== '') {
+        options.push({ key: 'MinTopUp', value: inputs.MinTopUp.toString() });
+      }
       if (originInputs.TopupGroupRatio !== inputs.TopupGroupRatio) {
         options.push({ key: 'TopupGroupRatio', value: inputs.TopupGroupRatio });
       }
@@ -174,6 +190,26 @@ export default function SettingsGeneralPayment(props) {
               '该服务器地址将影响支付回调地址以及默认首页展示的地址，请确保正确配置',
             )}
           />
+          <Row
+            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+            style={{ marginTop: 16 }}
+          >
+            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+              <Form.InputNumber
+                field='Price'
+                precision={2}
+                label={t('充值价格（x元/美金）')}
+                placeholder={t('例如：7，就是7元/美金')}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+              <Form.InputNumber
+                field='MinTopUp'
+                label={t('最低充值美元数量')}
+                placeholder={t('例如：2，就是最低充值2$')}
+              />
+            </Col>
+          </Row>
           <Row
             gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
             style={{ marginTop: 16 }}

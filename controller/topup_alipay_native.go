@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -104,13 +105,14 @@ func RequestAlipayNative(c *gin.Context) {
 	}
 
 	var p alipay.TradePagePay
-	serverAddress := strings.TrimRight(system_setting.ServerAddress, "/")
-	p.NotifyURL = serverAddress + "/api/user/alipay/notify"
-	p.ReturnURL = serverAddress + "/console/topup?show_history=true"
+	callbackAddress := strings.TrimRight(service.GetCallbackAddress(), "/")
+	p.NotifyURL = callbackAddress + "/api/user/alipay/notify"
+	p.ReturnURL = callbackAddress + "/api/user/alipay/return"
 	p.Subject = "API平台算力额度充值"
 	p.OutTradeNo = tradeNo
 	p.TotalAmount = fmt.Sprintf("%.2f", payMoney)
 	p.ProductCode = "FAST_INSTANT_TRADE_PAY"
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("支付宝充值订单创建 user_id=%d trade_no=%s amount=%d money=%.2f notify_url=%q return_url=%q production=%t", userId, tradeNo, requestAmount, payMoney, p.NotifyURL, p.ReturnURL, setting.AlipayProduction))
 
 	payURL, err := client.TradePagePay(p)
 	if err != nil {
@@ -125,47 +127,121 @@ func RequestAlipayNative(c *gin.Context) {
 	})
 }
 
+func completeAlipayTopUp(ctx context.Context, tradeNo string, totalAmount string, clientIp string) error {
+	topUp := model.GetTopUpByTradeNo(tradeNo)
+	if topUp == nil {
+		return model.ErrTopUpNotFound
+	}
+	if topUp.Status == common.TopUpStatusSuccess {
+		return nil
+	}
+	if topUp.Status != common.TopUpStatusPending {
+		return model.ErrTopUpStatusInvalid
+	}
+	if topUp.PaymentMethod != model.PaymentMethodAlipayNative {
+		return model.ErrPaymentMethodMismatch
+	}
+	notifyAmount, parseErr := strconv.ParseFloat(totalAmount, 64)
+	if parseErr != nil || fmt.Sprintf("%.2f", notifyAmount) != fmt.Sprintf("%.2f", topUp.Money) {
+		logger.LogError(ctx, fmt.Sprintf("支付宝回调金额不匹配: 订单号 %s, notify=%s, expected=%.2f", tradeNo, totalAmount, topUp.Money))
+		return fmt.Errorf("支付宝回调金额不匹配")
+	}
+	return model.CompleteTopUpPayment(tradeNo, model.PaymentMethodAlipayNative, model.PaymentMethodAlipayNative, clientIp)
+}
+
+// AlipayNativeReturn handles the browser return URL and falls back to active trade query.
+func AlipayNativeReturn(c *gin.Context) {
+	req := c.Request
+	if err := req.ParseForm(); err != nil {
+		logger.LogError(req.Context(), fmt.Sprintf("支付宝同步回跳表单解析失败 path=%q client_ip=%s error=%q", req.RequestURI, c.ClientIP(), err.Error()))
+		c.Redirect(http.StatusFound, strings.TrimRight(system_setting.ServerAddress, "/")+"/console/topup?pay=fail&show_history=true")
+		return
+	}
+	ctx := req.Context()
+	client := GetAlipayClient()
+	if client == nil {
+		logger.LogError(ctx, fmt.Sprintf("支付宝同步回跳 client 未初始化 path=%q client_ip=%s", req.RequestURI, c.ClientIP()))
+		c.Redirect(http.StatusFound, strings.TrimRight(system_setting.ServerAddress, "/")+"/console/topup?pay=fail&show_history=true")
+		return
+	}
+	if err := client.VerifySign(ctx, req.Form); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("支付宝同步回跳验签失败 path=%q client_ip=%s error=%q app_id=%s auth_app_id=%s out_trade_no=%s trade_no=%s, 请检查支付宝公钥配置是否为支付宝开放平台提供的支付宝公钥，沙箱环境需使用沙箱支付宝公钥，不能使用应用公钥", req.RequestURI, c.ClientIP(), err.Error(), req.Form.Get("app_id"), req.Form.Get("auth_app_id"), req.Form.Get("out_trade_no"), req.Form.Get("trade_no")))
+		c.Redirect(http.StatusFound, strings.TrimRight(system_setting.ServerAddress, "/")+"/console/topup?pay=fail&show_history=true")
+		return
+	}
+
+	tradeNo := req.Form.Get("out_trade_no")
+	alipayTradeNo := req.Form.Get("trade_no")
+	totalAmount := req.Form.Get("total_amount")
+	logger.LogInfo(ctx, fmt.Sprintf("支付宝同步回跳验签成功 trade_no=%s alipay_trade_no=%s total_amount=%s", tradeNo, alipayTradeNo, totalAmount))
+
+	queryRsp, err := client.TradeQuery(ctx, alipay.TradeQuery{OutTradeNo: tradeNo})
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("支付宝同步回跳交易查询失败 trade_no=%s error=%q", tradeNo, err.Error()))
+		c.Redirect(http.StatusFound, strings.TrimRight(system_setting.ServerAddress, "/")+"/console/topup?pay=pending&show_history=true")
+		return
+	}
+	if queryRsp.IsFailure() {
+		logger.LogError(ctx, fmt.Sprintf("支付宝同步回跳交易查询失败 trade_no=%s code=%s msg=%s sub_msg=%s", tradeNo, queryRsp.Code, queryRsp.Msg, queryRsp.SubMsg))
+		c.Redirect(http.StatusFound, strings.TrimRight(system_setting.ServerAddress, "/")+"/console/topup?pay=pending&show_history=true")
+		return
+	}
+	logger.LogInfo(ctx, fmt.Sprintf("支付宝同步回跳交易查询成功 trade_no=%s alipay_trade_no=%s trade_status=%s total_amount=%s", queryRsp.OutTradeNo, queryRsp.TradeNo, queryRsp.TradeStatus, queryRsp.TotalAmount))
+
+	if queryRsp.TradeStatus == alipay.TradeStatusSuccess || queryRsp.TradeStatus == alipay.TradeStatusFinished {
+		if err := completeAlipayTopUp(ctx, tradeNo, queryRsp.TotalAmount, c.ClientIP()); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("支付宝同步回跳加账失败 trade_no=%s error=%q", tradeNo, err.Error()))
+			c.Redirect(http.StatusFound, strings.TrimRight(system_setting.ServerAddress, "/")+"/console/topup?pay=fail&show_history=true")
+			return
+		}
+		logger.LogInfo(ctx, fmt.Sprintf("支付宝同步回跳确认到账 trade_no=%s", tradeNo))
+		c.Redirect(http.StatusFound, strings.TrimRight(system_setting.ServerAddress, "/")+"/console/topup?pay=success&show_history=true")
+		return
+	}
+
+	c.Redirect(http.StatusFound, strings.TrimRight(system_setting.ServerAddress, "/")+"/console/topup?pay=pending&show_history=true")
+}
+
 // AlipayNativeNotify 支付宝异步回调
 func AlipayNativeNotify(c *gin.Context) {
 	req := c.Request
 	if err := req.ParseForm(); err != nil {
+		logger.LogError(req.Context(), fmt.Sprintf("支付宝回调表单解析失败 path=%q client_ip=%s error=%q", req.RequestURI, c.ClientIP(), err.Error()))
 		c.String(http.StatusBadRequest, "fail")
 		return
 	}
 	ctx := req.Context()
+	formKeys := make([]string, 0, len(req.Form))
+	for key := range req.Form {
+		formKeys = append(formKeys, key)
+	}
+	logger.LogInfo(ctx, fmt.Sprintf("支付宝回调收到请求 path=%q client_ip=%s form_keys=%v", req.RequestURI, c.ClientIP(), formKeys))
 
 	client := GetAlipayClient()
 	if client == nil {
+		logger.LogError(ctx, fmt.Sprintf("支付宝回调 client 未初始化 path=%q client_ip=%s", req.RequestURI, c.ClientIP()))
 		c.String(http.StatusBadRequest, "fail")
 		return
 	}
 
 	noti, err := client.DecodeNotification(ctx, req.Form)
 	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("支付宝回调验签失败: %v", err))
+		logger.LogError(ctx, fmt.Sprintf("支付宝回调验签失败: %v, app_id=%s, auth_app_id=%s, out_trade_no=%s, trade_no=%s, 请检查支付宝公钥配置是否为支付宝开放平台提供的支付宝公钥，沙箱环境需使用沙箱支付宝公钥，不能使用应用公钥", err, req.Form.Get("app_id"), req.Form.Get("auth_app_id"), req.Form.Get("out_trade_no"), req.Form.Get("trade_no")))
 		c.String(http.StatusBadRequest, "fail")
 		return
 	}
+	logger.LogInfo(ctx, fmt.Sprintf("支付宝回调验签成功 trade_no=%s alipay_trade_no=%s trade_status=%s total_amount=%s", noti.OutTradeNo, noti.TradeNo, noti.TradeStatus, noti.TotalAmount))
 
 	if noti.TradeStatus == "TRADE_SUCCESS" || noti.TradeStatus == "TRADE_FINISHED" {
 		tradeNo := noti.OutTradeNo
-		topUp := model.GetTopUpByTradeNo(tradeNo)
-		if topUp == nil || topUp.Status != "pending" {
-			c.String(http.StatusOK, "success")
-			return
-		}
-		notifyAmount, parseErr := strconv.ParseFloat(noti.TotalAmount, 64)
-		if parseErr != nil || fmt.Sprintf("%.2f", notifyAmount) != fmt.Sprintf("%.2f", topUp.Money) {
-			logger.LogError(ctx, fmt.Sprintf("支付宝回调金额不匹配: 订单号 %s, notify=%s, expected=%.2f", tradeNo, noti.TotalAmount, topUp.Money))
-			c.String(http.StatusBadRequest, "fail")
-			return
-		}
-		if err = model.ManualCompleteTopUp(tradeNo, c.ClientIP()); err != nil {
+		if err = completeAlipayTopUp(ctx, tradeNo, noti.TotalAmount, c.ClientIP()); err != nil {
 			logger.LogError(ctx, fmt.Sprintf("支付宝单号 %s 加账失败: %v", tradeNo, err))
 			c.String(http.StatusInternalServerError, "fail")
 			return
 		}
 		logger.LogInfo(ctx, fmt.Sprintf("支付宝充值成功到账: 订单号 %s", tradeNo))
+	} else {
+		logger.LogInfo(ctx, fmt.Sprintf("支付宝回调忽略事件 trade_no=%s trade_status=%s", noti.OutTradeNo, noti.TradeStatus))
 	}
 
 	c.String(http.StatusOK, "success")

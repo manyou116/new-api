@@ -128,7 +128,13 @@ export function showError(error) {
           // 清除用户状态
           localStorage.removeItem('user');
           // toast.error('错误：未登录或登录已过期，请重新登录！', showErrorOptions);
-          window.location.href = '/login?expired=true';
+          {
+            const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+            const redirectQuery = currentPath.startsWith('/login')
+              ? ''
+              : `&redirect=${encodeURIComponent(currentPath)}`;
+            window.location.href = `/login?expired=true${redirectQuery}`;
+          }
           break;
         case 429:
           Toast.error('错误：请求次数过多，请稍后再试！');

@@ -28,6 +28,7 @@ import {
 import Hero from './Hero';
 import PricingAndTutorial from './Pricing';
 import ConfigGenerator from './ConfigGenerator';
+import IntegrationGuide from './IntegrationGuide';
 import PricingCalculator from './PricingCalculator';
 import ModelDistribution from './ModelDistribution';
 import { API, showError, copy, showSuccess } from '../../helpers';
@@ -170,6 +171,7 @@ const Home = () => {
           </div>
           {/* Dynamic billing options */}
           <PricingAndTutorial />
+          <IntegrationGuide />
           {/* Live model distribution */}
           <ModelDistribution />
         </div>

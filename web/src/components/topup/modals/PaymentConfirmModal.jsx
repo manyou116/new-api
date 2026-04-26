@@ -80,7 +80,7 @@ const PaymentConfirmModal = ({
         <div className='flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800'>
           <div className='flex items-center text-base font-semibold text-slate-900 dark:text-slate-100'>
             <CreditCard className='mr-2' size={18} />
-            {t('充值确认')}
+            {t('确认购买额度')}
           </div>
           <button
             type='button'
@@ -96,7 +96,7 @@ const PaymentConfirmModal = ({
           <div className='rounded-xl bg-slate-50 p-4 dark:bg-slate-800'>
             <div className='flex min-h-8 items-center justify-between'>
               <span className='font-semibold text-slate-700 dark:text-slate-200'>
-                {t('充值数量')}：
+                {t('预计到账')}：
               </span>
               <span className='text-slate-900 dark:text-slate-100'>
                 {renderQuotaWithAmount(topUpCount)}
@@ -104,7 +104,7 @@ const PaymentConfirmModal = ({
             </div>
             <div className='flex min-h-8 items-center justify-between'>
               <span className='font-semibold text-slate-700 dark:text-slate-200'>
-                {t('实付金额')}：
+                {t('预计支付')}：
               </span>
               {amountLoading ? (
                 <span className='h-4 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-700' />
@@ -146,7 +146,7 @@ const PaymentConfirmModal = ({
 
             <div className='space-y-2'>
               <div className='font-semibold text-slate-700 dark:text-slate-200'>
-                {t('支付方式')}
+                {t('付款方式')}
               </div>
               <div className='grid grid-cols-2 gap-2'>
                 {(payMethods || []).map((method) => {
@@ -192,7 +192,7 @@ const PaymentConfirmModal = ({
               className='inline-flex min-w-24 items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70'
             >
               {confirmLoading && <Loader2 className='mr-2 animate-spin' size={16} />}
-              {t('确认支付')}
+              {t('确认付款')}
             </button>
           </div>
         </div>

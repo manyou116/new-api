@@ -98,3 +98,9 @@ func isEpayWebhookConfigured() bool {
 func isEpayWebhookEnabled() bool {
 	return isEpayTopUpEnabled()
 }
+
+func isAlipayNativeTopUpEnabled() bool {
+	return strings.TrimSpace(setting.AlipayAppId) != "" &&
+		strings.TrimSpace(setting.AlipayPrivateKey) != "" &&
+		strings.TrimSpace(setting.AlipayPublicKey) != ""
+}
