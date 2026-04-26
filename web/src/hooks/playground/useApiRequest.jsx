@@ -32,6 +32,142 @@ import {
   processIncompleteThinkTags,
 } from '../../helpers';
 
+const toDisplayImageUrl = (value) => {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+
+  if (
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    value.startsWith('data:image/')
+  ) {
+    return value;
+  }
+
+  return `data:image/png;base64,${value}`;
+};
+
+const addImageContent = (contents, imageValue) => {
+  const url = toDisplayImageUrl(imageValue);
+  if (!url) {
+    return;
+  }
+  contents.push({
+    type: 'image_url',
+    image_url: { url },
+  });
+};
+
+const extractMarkdownImageContent = (text) => {
+  if (!text || typeof text !== 'string') {
+    return [];
+  }
+
+  const contents = [];
+  const imageRegex = /!\[[^\]]*\]\((data:image\/[^;\s)]+;base64,[^)\s]+|https?:\/\/[^)\s]+)\)/g;
+  let match;
+  while ((match = imageRegex.exec(text)) !== null) {
+    addImageContent(contents, match[1]);
+  }
+
+  const textWithoutImages = text.replace(imageRegex, '').trim();
+  if (textWithoutImages) {
+    contents.push({ type: 'text', text: textWithoutImages });
+  }
+
+  return contents;
+};
+
+const normalizeContentPart = (part) => {
+  if (!part || typeof part !== 'object') {
+    return [];
+  }
+
+  const contents = [];
+  const type = part.type;
+
+  if (type === 'text' || type === 'output_text') {
+    const text = part.text || part.content || '';
+    if (typeof text === 'string' && text.trim() !== '') {
+      contents.push({ type: 'text', text });
+    }
+    return contents;
+  }
+
+  if (type === 'image_url') {
+    const imageUrl =
+      typeof part.image_url === 'string'
+        ? part.image_url
+        : part.image_url?.url;
+    addImageContent(contents, imageUrl);
+    return contents;
+  }
+
+  if (type === 'output_image' || type === 'image') {
+    addImageContent(
+      contents,
+      part.image_url || part.url || part.b64_json || part.base64 || part.data,
+    );
+    return contents;
+  }
+
+  addImageContent(contents, part.url || part.b64_json || part.image_url);
+  return contents;
+};
+
+const extractImageResponseContent = (data) => {
+  const contents = [];
+
+  if (Array.isArray(data?.data)) {
+    data.data.forEach((item) => {
+      addImageContent(contents, item?.url || item?.b64_json || item?.image_url);
+    });
+  }
+
+  if (Array.isArray(data?.output)) {
+    data.output.forEach((item) => {
+      if (Array.isArray(item?.content)) {
+        item.content.forEach((part) => {
+          contents.push(...normalizeContentPart(part));
+        });
+      } else {
+        contents.push(...normalizeContentPart(item));
+      }
+    });
+  }
+
+  const messageContent = data?.choices?.[0]?.message?.content;
+  if (Array.isArray(messageContent)) {
+    messageContent.forEach((part) => {
+      contents.push(...normalizeContentPart(part));
+    });
+  } else if (typeof messageContent === 'string') {
+    contents.push(...extractMarkdownImageContent(messageContent));
+  }
+
+  if (contents.length === 0) {
+    return null;
+  }
+
+  const dedupedContents = [];
+  const imageUrls = new Set();
+  contents.forEach((item) => {
+    if (item.type !== 'image_url') {
+      dedupedContents.push(item);
+      return;
+    }
+    const url = item.image_url?.url;
+    if (!url || imageUrls.has(url)) {
+      return;
+    }
+    imageUrls.add(url);
+    dedupedContents.push(item);
+  });
+
+  return dedupedContents;
+};
+
 export const useApiRequest = (
   setMessage,
   setDebugData,
@@ -173,10 +309,15 @@ export const useApiRequest = (
 
   // 非流式请求
   const handleNonStreamRequest = useCallback(
-    async (payload) => {
+    async (payload, options = {}) => {
+      const endpoint = options.endpoint || API_ENDPOINTS.CHAT_COMPLETIONS;
+      const isFormData = payload instanceof FormData;
+      const debugRequest = isFormData
+        ? Object.fromEntries(payload.entries())
+        : payload;
       setDebugData((prev) => ({
         ...prev,
-        request: payload,
+        request: debugRequest,
         timestamp: new Date().toISOString(),
         response: null,
         sseMessages: null, // 非流式请求清除 SSE 消息
@@ -185,13 +326,17 @@ export const useApiRequest = (
       setActiveDebugTab(DEBUG_TABS.REQUEST);
 
       try {
-        const response = await fetch(API_ENDPOINTS.CHAT_COMPLETIONS, {
+        const headers = {
+          'New-Api-User': getUserIdFromLocalStorage(),
+        };
+        if (!isFormData) {
+          headers['Content-Type'] = 'application/json';
+        }
+
+        const response = await fetch(endpoint, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'New-Api-User': getUserIdFromLocalStorage(),
-          },
-          body: JSON.stringify(payload),
+          headers,
+          body: isFormData ? payload : JSON.stringify(payload),
         });
 
         if (!response.ok) {
@@ -239,7 +384,31 @@ export const useApiRequest = (
         }));
         setActiveDebugTab(DEBUG_TABS.RESPONSE);
 
-        if (data.choices?.[0]) {
+        const imageResponseContent = extractImageResponseContent(data);
+
+        if (imageResponseContent) {
+          setMessage((prevMessage) => {
+            const newMessages = [...prevMessage];
+            const lastMessage = newMessages[newMessages.length - 1];
+            if (lastMessage?.status === MESSAGE_STATUS.LOADING) {
+              const autoCollapseState = applyAutoCollapseLogic(
+                lastMessage,
+                true,
+              );
+
+              newMessages[newMessages.length - 1] = {
+                ...lastMessage,
+                content: imageResponseContent,
+                reasoningContent: '',
+                status: MESSAGE_STATUS.COMPLETE,
+                ...autoCollapseState,
+              };
+
+              setTimeout(() => saveMessages(newMessages), 0);
+            }
+            return newMessages;
+          });
+        } else if (data.choices?.[0]) {
           const choice = data.choices[0];
           let content = choice.message?.content || '';
           let reasoningContent =
@@ -265,6 +434,8 @@ export const useApiRequest = (
                 status: MESSAGE_STATUS.COMPLETE,
                 ...autoCollapseState,
               };
+
+              setTimeout(() => saveMessages(newMessages), 0);
             }
             return newMessages;
           });
@@ -292,12 +463,21 @@ export const useApiRequest = (
               status: MESSAGE_STATUS.ERROR,
               ...autoCollapseState,
             };
+
+            setTimeout(() => saveMessages(newMessages), 0);
           }
           return newMessages;
         });
       }
     },
-    [setDebugData, setActiveDebugTab, setMessage, t, applyAutoCollapseLogic],
+    [
+      setDebugData,
+      setActiveDebugTab,
+      setMessage,
+      t,
+      applyAutoCollapseLogic,
+      saveMessages,
+    ],
   );
 
   // SSE请求
@@ -536,11 +716,15 @@ export const useApiRequest = (
 
   // 发送请求
   const sendRequest = useCallback(
-    (payload, isStream) => {
+    (payload, isStream, options = {}) => {
+      if (options.endpoint && options.endpoint !== API_ENDPOINTS.CHAT_COMPLETIONS) {
+        handleNonStreamRequest(payload, options);
+        return;
+      }
       if (isStream) {
         handleSSE(payload);
       } else {
-        handleNonStreamRequest(payload);
+        handleNonStreamRequest(payload, options);
       }
     },
     [handleSSE, handleNonStreamRequest],

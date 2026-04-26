@@ -70,6 +70,8 @@ export const OptimizedSettingsPanel = React.memo(
       JSON.stringify(prevProps.groups) === JSON.stringify(nextProps.groups) &&
       prevProps.customRequestMode === nextProps.customRequestMode &&
       prevProps.customRequestBody === nextProps.customRequestBody &&
+      prevProps.canGenerateImage === nextProps.canGenerateImage &&
+      prevProps.canEditImage === nextProps.canEditImage &&
       prevProps.showDebugPanel === nextProps.showDebugPanel &&
       prevProps.showSettings === nextProps.showSettings &&
       JSON.stringify(prevProps.previewPayload) ===

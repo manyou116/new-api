@@ -167,6 +167,66 @@ export const buildApiPayload = (
   return payload;
 };
 
+const appendImageRequestParams = (target, inputs, isFormData = false) => {
+  const append = (key, value) => {
+    if (value === undefined || value === null || value === '') {
+      return;
+    }
+    if (isFormData) {
+      target.append(key, String(value));
+    } else {
+      target[key] = value;
+    }
+  };
+
+  append('model', inputs.model);
+  append('group', inputs.group);
+  append('size', inputs.imageSize);
+  append('quality', inputs.imageQuality);
+  append('n', inputs.imageN || 1);
+  append('response_format', 'url');
+};
+
+export const buildImageGenerationPayload = (prompt, inputs) => {
+  const payload = {
+    prompt,
+  };
+  appendImageRequestParams(payload, inputs);
+  return payload;
+};
+
+const dataUrlToFile = (dataUrl, filename) => {
+  const [header, base64] = dataUrl.split(',');
+  const mimeMatch = header.match(/^data:(.*?);base64$/);
+  const mimeType = mimeMatch?.[1] || 'image/png';
+  const binary = atob(base64 || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], filename, { type: mimeType });
+};
+
+export const buildImageEditPayload = async (prompt, imageUrls, inputs) => {
+  const formData = new FormData();
+  formData.append('prompt', prompt);
+  appendImageRequestParams(formData, inputs, true);
+
+  const validImageUrls = (imageUrls || []).filter(
+    (url) => url && url.trim() !== '',
+  );
+  validImageUrls.forEach((url, index) => {
+    const trimmed = url.trim();
+    if (trimmed.startsWith('data:image/')) {
+      formData.append('image', dataUrlToFile(trimmed, `image-${index + 1}.png`));
+    } else {
+      formData.append('image', trimmed);
+    }
+  });
+
+  return formData;
+};
+
 // 处理API错误响应
 export const handleApiError = (error, response = null) => {
   const errorInfo = {
@@ -191,10 +251,23 @@ export const handleApiError = (error, response = null) => {
 
 // 处理模型数据
 export const processModelsData = (data, currentModel) => {
-  const modelOptions = data.map((model) => ({
-    label: model,
-    value: model,
-  }));
+  const modelOptions = (data || []).map((model) => {
+    if (typeof model === 'string') {
+      return {
+        label: model,
+        value: model,
+        supported_endpoint_types: [],
+      };
+    }
+
+    const value = model.value || model.model || model.id || model.label || '';
+    return {
+      ...model,
+      label: model.label || value,
+      value,
+      supported_endpoint_types: model.supported_endpoint_types || [],
+    };
+  });
 
   const hasCurrentModel = modelOptions.some(
     (option) => option.value === currentModel,

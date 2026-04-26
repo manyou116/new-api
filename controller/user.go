@@ -752,10 +752,34 @@ func GetUserModels(c *gin.Context) {
 	}
 	sort.Strings(models)
 
+	if c.Query("with_endpoint_types") != "1" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    models,
+		})
+		return
+	}
+
+	type userModelOption struct {
+		Value                  string                  `json:"value"`
+		Label                  string                  `json:"label"`
+		SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
+	}
+
+	modelOptions := make([]userModelOption, 0, len(models))
+	for _, modelName := range models {
+		modelOptions = append(modelOptions, userModelOption{
+			Value:                  modelName,
+			Label:                  modelName,
+			SupportedEndpointTypes: model.GetModelSupportEndpointTypes(modelName),
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    models,
+		"data":    modelOptions,
 	})
 	return
 }

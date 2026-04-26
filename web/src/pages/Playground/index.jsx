@@ -38,6 +38,7 @@ import { useDataLoader } from '../../hooks/playground/useDataLoader';
 import {
   MESSAGE_ROLES,
   ERROR_MESSAGES,
+  API_ENDPOINTS,
 } from '../../constants/playground.constants';
 import {
   getLogo,
@@ -47,6 +48,8 @@ import {
   createLoadingAssistantMessage,
   getTextContent,
   buildApiPayload,
+  buildImageGenerationPayload,
+  buildImageEditPayload,
   encodeToBase64,
 } from '../../helpers';
 
@@ -176,6 +179,32 @@ const Playground = () => {
     },
   };
 
+  const selectedModelOption = models.find(
+    (option) => option.value === inputs.model,
+  );
+  const supportedEndpointTypes =
+    selectedModelOption?.supported_endpoint_types || [];
+  const normalizedModelName = String(inputs.model || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-');
+  const isGptImageModel = normalizedModelName.startsWith('gpt-image');
+  const isKnownImageModel =
+    isGptImageModel ||
+    normalizedModelName.includes('dall-e') ||
+    normalizedModelName.startsWith('imagen-') ||
+    normalizedModelName.startsWith('flux-') ||
+    normalizedModelName.startsWith('flux.1-');
+  const canGenerateImage =
+    supportedEndpointTypes.includes('image-generation') || isKnownImageModel;
+  const canEditImage = isGptImageModel;
+  const actionCapabilities = {
+    canGenerateImage,
+    canEditImage,
+    imageCount: (inputs.imageUrls || []).filter((url) => url.trim() !== '')
+      .length,
+  };
+
   // 消息操作
   const messageActions = useMessageActions(
     message,
@@ -251,7 +280,7 @@ const Playground = () => {
   }, [inputs.model, models, t]);
 
   // 发送消息
-  function onMessageSend(content, attachment) {
+  function onMessageSend(content, attachment, action = 'chat') {
     console.log('attachment: ', attachment);
 
     if (!customRequestMode && !isCurrentModelAvailable()) {
@@ -284,6 +313,79 @@ const Playground = () => {
         Toast.error(ERROR_MESSAGES.JSON_PARSE_ERROR);
         return;
       }
+    }
+
+    if (action === 'chat' && canGenerateImage) {
+      action = 'image_generation';
+    }
+
+    if (action === 'image_generation') {
+      if (!canGenerateImage) {
+        Toast.warning(t('当前模型不支持生图'));
+        return;
+      }
+
+      const validImageUrls = inputs.imageUrls.filter((url) => url.trim() !== '');
+      if (validImageUrls.length > 0 && canEditImage) {
+        action = 'image_edit';
+      } else if (validImageUrls.length > 0 && !canEditImage) {
+        Toast.warning(t('当前模型暂不支持参考图生成'));
+        return;
+      }
+    }
+
+    if (action === 'image_generation') {
+
+      const userMessageWithPrompt = createMessage(MESSAGE_ROLES.USER, content);
+
+      setMessage((prevMessage) => {
+        const newMessages = [...prevMessage, userMessageWithPrompt];
+        const payload = buildImageGenerationPayload(content, inputs);
+        sendRequest(payload, false, { endpoint: API_ENDPOINTS.IMAGE_GENERATIONS });
+
+        const messagesWithLoading = [...newMessages, loadingMessage];
+        setTimeout(() => saveMessagesImmediately(messagesWithLoading), 0);
+        return messagesWithLoading;
+      });
+      return;
+    }
+
+    if (action === 'image_edit') {
+      if (!canEditImage) {
+        Toast.warning(t('当前模型不支持参考图生成'));
+        return;
+      }
+
+      const validImageUrls = inputs.imageUrls.filter((url) => url.trim() !== '');
+      if (validImageUrls.length === 0) {
+        Toast.warning(t('请先添加或粘贴参考图'));
+        return;
+      }
+      if (validImageUrls.some((url) => !url.trim().startsWith('data:image/'))) {
+        Toast.warning(t('请上传或粘贴参考图，当前暂不支持把远程图片 URL 作为文件上传'));
+        return;
+      }
+      const messageContent = buildMessageContent(content, validImageUrls, true);
+      const userMessageWithImages = createMessage(
+        MESSAGE_ROLES.USER,
+        messageContent,
+      );
+
+      setMessage((prevMessage) => {
+        const newMessages = [...prevMessage, userMessageWithImages];
+        buildImageEditPayload(content, validImageUrls, inputs).then((payload) => {
+          sendRequest(payload, false, { endpoint: API_ENDPOINTS.IMAGE_EDITS });
+        });
+
+        setTimeout(() => {
+          handleInputChange('imageUrls', []);
+        }, 100);
+
+        const messagesWithLoading = [...newMessages, loadingMessage];
+        setTimeout(() => saveMessagesImmediately(messagesWithLoading), 0);
+        return messagesWithLoading;
+      });
+      return;
     }
 
     // 默认模式
@@ -459,21 +561,51 @@ const Playground = () => {
   // 处理粘贴图片
   const handlePasteImage = useCallback(
     (base64Data) => {
-      if (!inputs.imageEnabled) {
+      if (!inputs.imageEnabled && !canEditImage) {
         return;
       }
       // 添加图片到 imageUrls 数组
       const newUrls = [...(inputs.imageUrls || []), base64Data];
       handleInputChange('imageUrls', newUrls);
     },
-    [inputs.imageEnabled, inputs.imageUrls, handleInputChange],
+    [
+      inputs.imageEnabled,
+      inputs.imageUrls,
+      canEditImage,
+      handleInputChange,
+    ],
+  );
+
+  const handleRemoveReferenceImage = useCallback(
+    (index) => {
+      handleInputChange(
+        'imageUrls',
+        (inputs.imageUrls || []).filter((_, imageIndex) => imageIndex !== index),
+      );
+    },
+    [inputs.imageUrls, handleInputChange],
+  );
+
+  const handleImageParamChange = useCallback(
+    (key, value) => {
+      handleInputChange(key, value);
+    },
+    [handleInputChange],
   );
 
   // Playground Context 值
   const playgroundContextValue = {
     onPasteImage: handlePasteImage,
+    onRemoveImage: handleRemoveReferenceImage,
+    onImageParamChange: handleImageParamChange,
     imageUrls: inputs.imageUrls || [],
-    imageEnabled: inputs.imageEnabled || false,
+    imageEnabled: inputs.imageEnabled || canEditImage,
+    imageParams: {
+      imageSize: inputs.imageSize || '1024x1024',
+      imageQuality: inputs.imageQuality || 'auto',
+      imageN: inputs.imageN || 1,
+    },
+    actionCapabilities,
   };
 
   return (
@@ -502,6 +634,8 @@ const Playground = () => {
                 showDebugPanel={showDebugPanel}
                 customRequestMode={customRequestMode}
                 customRequestBody={customRequestBody}
+                canGenerateImage={canGenerateImage}
+                canEditImage={canEditImage}
                 onInputChange={handleInputChange}
                 onParameterToggle={handleParameterToggle}
                 onCloseSettings={() => setShowSettings(false)}
@@ -526,6 +660,7 @@ const Playground = () => {
                   showDebugPanel={showDebugPanel}
                   roleInfo={roleInfo}
                   onMessageSend={onMessageSend}
+                  actionCapabilities={actionCapabilities}
                   onMessageCopy={messageActions.handleMessageCopy}
                   onMessageReset={messageActions.handleMessageReset}
                   onMessageDelete={messageActions.handleMessageDelete}

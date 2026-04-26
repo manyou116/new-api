@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   API,
   getLogo,
@@ -70,6 +70,7 @@ import { SiDiscord } from 'react-icons/si';
 const RegisterForm = () => {
   let navigate = useNavigate();
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const githubButtonTextKeyByState = {
     idle: '使用 GitHub 继续',
     redirecting: '正在跳转 GitHub...',
@@ -116,6 +117,12 @@ const RegisterForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
+
+  const getRedirectPath = () => {
+    const redirect = searchParams.get('redirect');
+    if (redirect && redirect.startsWith('/')) return redirect;
+    return '/console';
+  };
 
   let affCode = new URLSearchParams(window.location.search).get('aff');
   if (affCode) {
@@ -202,7 +209,7 @@ const RegisterForm = () => {
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigate(getRedirectPath());
         showSuccess('登录成功！');
         setShowWeChatLoginModal(false);
       } else {
@@ -245,7 +252,8 @@ const RegisterForm = () => {
         );
         const { success, message } = res.data;
         if (success) {
-          navigate('/login');
+          const redirect = getRedirectPath();
+          navigate(`/login?redirect=${encodeURIComponent(redirect)}`);
           showSuccess('注册成功！');
         } else {
           showError(message);
@@ -395,7 +403,7 @@ const RegisterForm = () => {
         showSuccess('登录成功！');
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigate(getRedirectPath());
       } else {
         showError(message);
       }

@@ -87,6 +87,7 @@ const TopUp = () => {
   const [payMethods, setPayMethods] = useState([]);
 
   const affFetchedRef = useRef(false);
+  const autoCheckoutRef = useRef(false);
 
   // 邀请相关状态
   const [affLink, setAffLink] = useState('');
@@ -113,6 +114,7 @@ const TopUp = () => {
     amount_options: [],
     discount: {},
   });
+  const [topupInfoLoaded, setTopupInfoLoaded] = useState(false);
 
   const confirmPayMethods = [
     ...payMethods,
@@ -134,6 +136,14 @@ const TopUp = () => {
       : minTopUp;
   };
 
+  const resolveInitialTopUpAmount = (minAmount) => {
+    const rawAmount = Number(searchParams.get('amount'));
+    if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+      return minAmount;
+    }
+    return Math.max(Math.ceil(rawAmount), minAmount);
+  };
+
   const requestAmountByPayment = async (payment, value) => {
     if (payment === 'stripe') {
       return getStripeAmount(value);
@@ -145,6 +155,22 @@ const TopUp = () => {
       return getWaffoAmount(value);
     }
     return getAmount(value);
+  };
+
+  const isPaymentEnabled = (payment) => {
+    if (payment === 'stripe') return enableStripeTopUp;
+    if (payment === 'waffo_pancake') return enableWaffoPancakeTopUp;
+    if (typeof payment === 'string' && payment.startsWith('waffo:')) {
+      return enableWaffoTopUp;
+    }
+    return enableOnlineTopUp;
+  };
+
+  const pickAutoCheckoutPayment = () => {
+    return confirmPayMethods.find((method) => {
+      if (!method?.type || !isPaymentEnabled(method.type)) return false;
+      return Number(topUpCount || 0) >= getPaymentMinTopUp(method.type);
+    });
   };
 
   const topUp = async () => {
@@ -232,6 +258,25 @@ const TopUp = () => {
     }
   };
 
+  const changePayWayInConfirm = async (payment) => {
+    if (!payment || payment === payWay) return;
+    if (!isPaymentEnabled(payment)) {
+      showError(t('该支付方式未开启'));
+      return;
+    }
+    const selectedMinTopUp = getPaymentMinTopUp(payment);
+    if (topUpCount < selectedMinTopUp) {
+      showError(t('充值数量不能小于') + selectedMinTopUp);
+      return;
+    }
+    setPayWay(payment);
+    try {
+      await requestAmountByPayment(payment, topUpCount);
+    } catch (error) {
+      showError(t('获取金额失败'));
+    }
+  };
+
   const onlineTopUp = async () => {
     if (payWay === 'waffo_pancake') {
       setConfirmLoading(true);
@@ -281,8 +326,13 @@ const TopUp = () => {
           amount: parseInt(topUpCount),
           payment_method: 'stripe',
         });
+      } else if (payWay === 'alipay_native') {
+        // 支付宝原生 SDK — 返回跳转 URL
+        const formData = new FormData();
+        formData.append('amount', topUpCount.toString());
+        res = await API.post('/api/user/alipay/pay', formData);
       } else {
-        // 普通支付请求
+        // 普通支付请求（易支付 epay）
         res = await API.post('/api/user/pay', {
           amount: parseInt(topUpCount),
           payment_method: payWay,
@@ -295,6 +345,9 @@ const TopUp = () => {
           if (payWay === 'stripe') {
             // Stripe 支付回调处理
             window.open(data.pay_link, '_blank');
+          } else if (payWay === 'alipay_native') {
+            // 支付宝原生 — 直接跳转到支付宝收银台
+            window.open(data, '_blank');
           } else {
             // 普通支付表单提交
             let params = data;
@@ -573,6 +626,7 @@ const TopUp = () => {
 
   // 获取充值配置信息
   const getTopupInfo = async () => {
+    setTopupInfoLoaded(false);
     try {
       const res = await API.get('/api/user/topup/info');
       const { message, data, success } = res.data;
@@ -613,7 +667,7 @@ const TopUp = () => {
               }
 
               if (!method.color) {
-                if (method.type === 'alipay') {
+                if (method.type === 'alipay' || method.type === 'alipay_native') {
                   method.color = 'rgba(var(--semi-blue-5), 1)';
                 } else if (method.type === 'wxpay') {
                   method.color = 'rgba(var(--semi-green-5), 1)';
@@ -656,8 +710,9 @@ const TopUp = () => {
           setWaffoMinTopUp(data.waffo_min_topup || 1);
           setEnableWaffoPancakeTopUp(enableWaffoPancakeTopUp);
           setWaffoPancakeMinTopUp(data.waffo_pancake_min_topup || 1);
+          const initialTopUpAmount = resolveInitialTopUpAmount(minTopUpValue);
           setMinTopUp(minTopUpValue);
-          setTopUpCount(minTopUpValue);
+          setTopUpCount(initialTopUpAmount);
 
           // 设置 Creem 产品
           try {
@@ -673,7 +728,7 @@ const TopUp = () => {
           }
 
           // 初始化显示实付金额
-          getAmount(minTopUpValue);
+          getAmount(initialTopUpAmount);
         } catch (e) {
           setPayMethods([]);
         }
@@ -691,6 +746,8 @@ const TopUp = () => {
       }
     } catch (error) {
       showError(t('获取充值配置异常'));
+    } finally {
+      setTopupInfoLoaded(true);
     }
   };
 
@@ -770,6 +827,35 @@ const TopUp = () => {
       setStatusLoading(false);
     }
   }, [statusState?.status]);
+
+  useEffect(() => {
+    if (autoCheckoutRef.current) return;
+    if (searchParams.get('checkout') !== '1') return;
+    if (searchParams.get('tab') !== 'topup') return;
+    if (!topupInfoLoaded || statusLoading || paymentLoading || open) return;
+
+    const payment = pickAutoCheckoutPayment();
+    if (!payment) return;
+
+    autoCheckoutRef.current = true;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('checkout');
+    setSearchParams(nextParams, { replace: true });
+    preTopUp(payment.type);
+  }, [
+    enableOnlineTopUp,
+    enableStripeTopUp,
+    enableWaffoTopUp,
+    enableWaffoPancakeTopUp,
+    open,
+    paymentLoading,
+    searchParams,
+    statusLoading,
+    topUpCount,
+    topupInfoLoaded,
+    payMethods,
+    waffoPayMethods,
+  ]);
 
   const renderAmount = () => {
     return amount + ' ' + t('元');
@@ -900,6 +986,7 @@ const TopUp = () => {
         amountLoading={amountLoading}
         renderAmount={renderAmount}
         payWay={payWay}
+        onPayWayChange={changePayWayInConfirm}
         payMethods={confirmPayMethods}
         amountNumber={amount}
         discountRate={topupInfo?.discount?.[topUpCount] || 1.0}
@@ -981,6 +1068,8 @@ const TopUp = () => {
           onOpenHistory={handleOpenHistory}
           subscriptionLoading={subscriptionLoading}
           subscriptionPlans={subscriptionPlans}
+          initialTab={searchParams.get('tab')}
+          initialPlanId={searchParams.get('plan_id')}
           billingPreference={billingPreference}
           onChangeBillingPreference={updateBillingPreference}
           activeSubscriptions={activeSubscriptions}

@@ -466,6 +466,23 @@ export const hasImageContent = (message) => {
 export const formatMessageForAPI = (message) => {
   if (!message) return null;
 
+  if (message.role === MESSAGE_ROLES.ASSISTANT && hasImageContent(message)) {
+    const textParts = Array.isArray(message.content)
+      ? message.content
+          .filter((item) => item.type === 'text')
+          .map((item) => item.text)
+          .filter(Boolean)
+      : [];
+
+    return {
+      role: message.role,
+      content:
+        textParts.length > 0
+          ? `${textParts.join('\n\n')}\n\n[已生成图片，图片内容未附加到后续上下文]`
+          : '[已生成图片，图片内容未附加到后续上下文]',
+    };
+  }
+
   return {
     role: message.role,
     content: message.content,

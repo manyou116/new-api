@@ -88,6 +88,19 @@ const LoginForm = () => {
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState] = useContext(StatusContext);
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
+
+  // After login, redirect to ?redirect param if present, else /console
+  const getRedirectPath = () => {
+    const r = searchParams.get('redirect');
+    if (r && r.startsWith('/')) return r;
+    return '/console';
+  };
+  const registerPath = useMemo(() => {
+    const redirect = getRedirectPath();
+    return redirect === '/console'
+      ? '/register'
+      : `/register?redirect=${encodeURIComponent(redirect)}`;
+  }, [searchParams]);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
   const [turnstileToken, setTurnstileToken] = useState('');
   const [showWeChatLoginModal, setShowWeChatLoginModal] = useState(false);
@@ -202,7 +215,7 @@ const LoginForm = () => {
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigate(getRedirectPath());
         showSuccess('登录成功！');
         setShowWeChatLoginModal(false);
       } else {
@@ -259,7 +272,7 @@ const LoginForm = () => {
               centered: true,
             });
           }
-          navigate('/console');
+          navigate(getRedirectPath());
         } else {
           showError(message);
         }
@@ -304,7 +317,7 @@ const LoginForm = () => {
         showSuccess('登录成功！');
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigate(getRedirectPath());
       } else {
         showError(message);
       }
@@ -475,7 +488,7 @@ const LoginForm = () => {
         setUserData(finish.data);
         updateAPI();
         showSuccess('登录成功！');
-        navigate('/console');
+        navigate(getRedirectPath());
       } else {
         showError(finish.message || 'Passkey 登录失败，请重试');
       }
@@ -510,7 +523,7 @@ const LoginForm = () => {
     setUserData(data);
     updateAPI();
     showSuccess('登录成功！');
-    navigate('/console');
+    navigate(getRedirectPath());
   };
 
   // 返回登录页面
@@ -737,7 +750,7 @@ const LoginForm = () => {
                   <Text>
                     {t('没有账户？')}{' '}
                     <Link
-                      to='/register'
+                      to={registerPath}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('注册')}
@@ -890,7 +903,7 @@ const LoginForm = () => {
                   <Text>
                     {t('没有账户？')}{' '}
                     <Link
-                      to='/register'
+                      to={registerPath}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('注册')}

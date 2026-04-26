@@ -17,18 +17,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useRef, useEffect, useCallback } from 'react';
-import { Toast } from '@douyinfe/semi-ui';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
+import { Button, ImagePreview, InputNumber, Select, Toast } from '@douyinfe/semi-ui';
+import { Eye, ImagePlus, SlidersHorizontal, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePlayground } from '../../contexts/PlaygroundContext';
 
 const CustomInputRender = (props) => {
   const { t } = useTranslation();
-  const { onPasteImage, imageEnabled } = usePlayground();
-  const { detailProps } = props;
-  const { clearContextNode, uploadNode, inputNode, sendNode, onClick } =
-    detailProps;
+  const {
+    onPasteImage,
+    onRemoveImage,
+    onImageParamChange,
+    imageEnabled,
+    imageUrls,
+    imageParams,
+  } = usePlayground();
+  const { detailProps, actionCapabilities, onSendWithAction } = props;
+  const { clearContextNode, inputNode, sendNode, onClick } = detailProps;
   const containerRef = useRef(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewVisible, setPreviewVisible] = useState(false);
 
   const handlePaste = useCallback(
     async (e) => {
@@ -134,20 +143,201 @@ const CustomInputRender = (props) => {
     },
   });
 
+  const validImageCount = (imageUrls || []).filter(
+    (url) => url && url.trim() !== '',
+  ).length;
+  const validImages = (imageUrls || [])
+    .map((url, index) => ({ url, index }))
+    .filter((item) => item.url && item.url.trim() !== '');
+  const canGenerateImage = actionCapabilities?.canGenerateImage;
+  const canEditImage = actionCapabilities?.canEditImage;
+  const imageAction = validImageCount > 0 && canEditImage ? 'image_edit' : 'image_generation';
+  const imageActionLabel = validImageCount > 0 && canEditImage ? t('参考图生成') : t('生成图片');
+
+  const imageSizeOptions = [
+    { label: t('正方形'), value: '1024x1024' },
+    { label: t('横图'), value: '1536x1024' },
+    { label: t('竖图'), value: '1024x1536' },
+    { label: t('自动'), value: 'auto' },
+  ];
+  const imageQualityOptions = [
+    { label: t('自动'), value: 'auto' },
+    { label: t('标准'), value: 'standard' },
+    { label: t('高清'), value: 'hd' },
+    { label: t('低'), value: 'low' },
+    { label: t('中'), value: 'medium' },
+    { label: t('高'), value: 'high' },
+  ];
+
+  const clearComposerInput = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const controls = [
+      ...container.querySelectorAll('textarea'),
+      ...container.querySelectorAll('input:not([type="file"]):not([readonly])'),
+    ];
+
+    controls.forEach((control) => {
+      const prototype = Object.getPrototypeOf(control);
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+      if (descriptor?.set) {
+        descriptor.set.call(control, '');
+      } else {
+        control.value = '';
+      }
+      control.dispatchEvent(new Event('input', { bubbles: true }));
+      control.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    container.querySelectorAll('[contenteditable="true"]').forEach((editable) => {
+      editable.textContent = '';
+      editable.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+  }, []);
+
+  const handleActionClick = useCallback(
+    (event, action) => {
+      event.stopPropagation();
+      const textarea = containerRef.current?.querySelector('textarea');
+      const input = containerRef.current?.querySelector('input');
+      const content = textarea?.value || input?.value || '';
+
+      if (!content.trim()) {
+        Toast.warning(t('请输入内容'));
+        return;
+      }
+
+      onSendWithAction?.(content, undefined, action);
+
+      clearComposerInput();
+      requestAnimationFrame(clearComposerInput);
+    },
+    [clearComposerInput, onSendWithAction, t],
+  );
+
   return (
     <div className='p-2 sm:p-4' ref={containerRef}>
+      {canGenerateImage && canEditImage && validImages.length > 0 && (
+        <div className='mb-2 rounded-xl border border-blue-100 bg-blue-50/60 p-2'>
+          <div className='mb-2 flex items-center justify-between gap-2 text-xs text-blue-700'>
+            <span>{`${t('已添加')} ${validImages.length} ${t('张参考图片')}`}</span>
+            <span className='text-blue-500'>{t('生成时将自动参考这些图片')}</span>
+          </div>
+          <div className='flex gap-2 overflow-x-auto pb-1 image-list-scroll'>
+            {validImages.map(({ url, index }) => (
+              <div
+                key={`${url.slice(0, 32)}-${index}`}
+                className='group relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-white bg-white shadow-sm'
+              >
+                <img
+                  src={url}
+                  alt={`${t('参考图')} ${index + 1}`}
+                  className='h-full w-full object-cover'
+                />
+                <div className='absolute inset-0 hidden items-center justify-center gap-1 bg-black/40 group-hover:flex'>
+                  <Button
+                    icon={<Eye size={12} />}
+                    size='small'
+                    theme='solid'
+                    type='tertiary'
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setPreviewUrl(url);
+                      setPreviewVisible(true);
+                    }}
+                    className='!h-6 !w-6 !min-w-0 !rounded-full !p-0'
+                    title={t('预览')}
+                  />
+                  <Button
+                    icon={<X size={12} />}
+                    size='small'
+                    theme='solid'
+                    type='danger'
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRemoveImage?.(index);
+                    }}
+                    className='!h-6 !w-6 !min-w-0 !rounded-full !p-0'
+                    title={t('删除')}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {canGenerateImage && (
+        <div className='mb-2 rounded-xl border border-gray-100 bg-white p-2 shadow-sm'>
+          <div className='mb-2 flex items-center gap-2 text-xs font-medium text-gray-600'>
+            <SlidersHorizontal size={13} />
+            <span>{t('图片参数')}</span>
+            {canEditImage && validImageCount === 0 && (
+              <span className='font-normal text-gray-400'>
+                {t('上传或粘贴参考图后自动参考生成')}
+              </span>
+            )}
+          </div>
+          <div className='grid grid-cols-3 gap-2'>
+            <Select
+              size='small'
+              value={imageParams?.imageSize || '1024x1024'}
+              optionList={imageSizeOptions}
+              onChange={(value) => onImageParamChange?.('imageSize', value)}
+              prefix={t('尺寸')}
+              style={{ width: '100%' }}
+            />
+            <Select
+              size='small'
+              value={imageParams?.imageQuality || 'auto'}
+              optionList={imageQualityOptions}
+              onChange={(value) => onImageParamChange?.('imageQuality', value)}
+              prefix={t('质量')}
+              style={{ width: '100%' }}
+            />
+            <InputNumber
+              size='small'
+              value={imageParams?.imageN || 1}
+              min={1}
+              max={4}
+              precision={0}
+              prefix={t('张数')}
+              onNumberChange={(value) => onImageParamChange?.('imageN', value || 1)}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
+      )}
       <div
-        className='flex items-center gap-2 sm:gap-3 p-2 bg-gray-50 rounded-xl sm:rounded-2xl shadow-sm hover:shadow-md transition-shadow'
+        className='flex flex-wrap items-center gap-2 sm:gap-3 p-2 bg-gray-50 rounded-xl sm:rounded-2xl shadow-sm hover:shadow-md transition-shadow'
         style={{ border: '1px solid var(--semi-color-border)' }}
         onClick={onClick}
         title={t('支持 Ctrl+V 粘贴图片')}
       >
         {/* 清空对话按钮 - 左边 */}
         {styledClearNode}
-        <div className='flex-1'>{inputNode}</div>
+        <div className='min-w-[180px] flex-1'>{inputNode}</div>
+        {canGenerateImage && (
+          <Button
+            icon={<ImagePlus size={15} />}
+            onClick={(event) => handleActionClick(event, imageAction)}
+            theme='solid'
+            type='primary'
+            size='small'
+            className='!rounded-full flex-shrink-0'
+            title={imageActionLabel}
+          >
+            {imageActionLabel}
+          </Button>
+        )}
         {/* 发送按钮 - 右边 */}
-        {styledSendNode}
+        {!canGenerateImage && styledSendNode}
       </div>
+      <ImagePreview
+        src={previewUrl}
+        visible={previewVisible}
+        onVisibleChange={setPreviewVisible}
+      />
     </div>
   );
 };

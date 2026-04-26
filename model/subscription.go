@@ -192,6 +192,64 @@ func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 	return nil
 }
 
+func seedDefaultSubscriptionPlans() error {
+	if DB == nil || !DB.Migrator().HasTable(&SubscriptionPlan{}) {
+		return nil
+	}
+
+	var count int64
+	if err := DB.Model(&SubscriptionPlan{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	plans := []SubscriptionPlan{
+		{
+			Title:              "轻量体验包",
+			Subtitle:           "适合个人测试、插件接入和小流量实验",
+			PriceAmount:        9.9,
+			Currency:           "USD",
+			DurationUnit:       SubscriptionDurationMonth,
+			DurationValue:      1,
+			Enabled:            true,
+			SortOrder:          30,
+			TotalAmount:        1000000,
+			QuotaResetPeriod:   SubscriptionResetNever,
+			AllowedTokenGroups: "",
+		},
+		{
+			Title:              "开发者月包",
+			Subtitle:           "适合日常开发、自动化脚本和中等频率调用",
+			PriceAmount:        29.9,
+			Currency:           "USD",
+			DurationUnit:       SubscriptionDurationMonth,
+			DurationValue:      1,
+			Enabled:            true,
+			SortOrder:          20,
+			TotalAmount:        5000000,
+			QuotaResetPeriod:   SubscriptionResetMonthly,
+			AllowedTokenGroups: "",
+		},
+		{
+			Title:              "团队生产包",
+			Subtitle:           "适合团队共享额度、生产调用和稳定对账",
+			PriceAmount:        99,
+			Currency:           "USD",
+			DurationUnit:       SubscriptionDurationMonth,
+			DurationValue:      1,
+			Enabled:            true,
+			SortOrder:          10,
+			TotalAmount:        20000000,
+			QuotaResetPeriod:   SubscriptionResetMonthly,
+			AllowedTokenGroups: "",
+		},
+	}
+
+	return DB.Create(&plans).Error
+}
+
 // Subscription order (payment -> webhook -> create UserSubscription)
 type SubscriptionOrder struct {
 	Id     int     `json:"id"`

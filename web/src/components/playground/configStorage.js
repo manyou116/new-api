@@ -24,6 +24,75 @@ import {
 
 const MESSAGES_STORAGE_KEY = 'playground_messages';
 
+const isPersistableImageUrl = (url) => {
+  if (!url || typeof url !== 'string') {
+    return false;
+  }
+  const trimmed = url.trim();
+  return (
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('/')
+  );
+};
+
+const getImageUrl = (item) => {
+  if (!item || item.type !== 'image_url') {
+    return '';
+  }
+  return typeof item.image_url === 'string'
+    ? item.image_url
+    : item.image_url?.url || '';
+};
+
+const normalizeImageItem = (item, url) => ({
+  ...item,
+  image_url: typeof item.image_url === 'string' ? url : { ...item.image_url, url },
+});
+
+const sanitizeMessageForStorage = (message) => {
+  if (!message || !Array.isArray(message.content)) {
+    return message;
+  }
+
+  const nextContent = [];
+  let removedImageCount = 0;
+
+  message.content.forEach((item) => {
+    if (item?.type !== 'image_url') {
+      nextContent.push(item);
+      return;
+    }
+
+    const imageUrl = getImageUrl(item);
+    if (isPersistableImageUrl(imageUrl)) {
+      nextContent.push(normalizeImageItem(item, imageUrl.trim()));
+      return;
+    }
+
+    removedImageCount += 1;
+  });
+
+  if (removedImageCount > 0) {
+    nextContent.push({
+      type: 'text',
+      text: `[${removedImageCount} 张本地图片未保存到历史记录]`,
+    });
+  }
+
+  return {
+    ...message,
+    content: nextContent.length > 0 ? nextContent : message.content,
+  };
+};
+
+const sanitizeMessagesForStorage = (messages) => {
+  if (!Array.isArray(messages)) {
+    return messages;
+  }
+  return messages.map(sanitizeMessageForStorage);
+};
+
 /**
  * 保存配置到 localStorage
  * @param {Object} config - 要保存的配置对象
@@ -47,7 +116,7 @@ export const saveConfig = (config) => {
 export const saveMessages = (messages) => {
   try {
     const messagesToSave = {
-      messages,
+      messages: sanitizeMessagesForStorage(messages),
       timestamp: new Date().toISOString(),
     };
     localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messagesToSave));

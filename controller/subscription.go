@@ -22,6 +22,46 @@ type BillingPreferenceRequest struct {
 	BillingPreference string `json:"billing_preference"`
 }
 
+// ---- Public APIs (no auth required) ----
+
+// GetPublicSubscriptionPlans returns enabled plans for the landing page (unauthenticated).
+// Only safe display fields are returned; sensitive payment IDs are omitted.
+func GetPublicSubscriptionPlans(c *gin.Context) {
+	var plans []model.SubscriptionPlan
+	if err := model.DB.Where("enabled = ?", true).Order("sort_order asc, id asc").Find(&plans).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	type PublicPlan struct {
+		Id               int     `json:"id"`
+		Title            string  `json:"title"`
+		Subtitle         string  `json:"subtitle"`
+		PriceAmount      float64 `json:"price_amount"`
+		Currency         string  `json:"currency"`
+		DurationUnit     string  `json:"duration_unit"`
+		DurationValue    int     `json:"duration_value"`
+		TotalAmount      int64   `json:"total_amount"`
+		QuotaResetPeriod string  `json:"quota_reset_period"`
+		UpgradeGroup     string  `json:"upgrade_group"`
+	}
+	result := make([]PublicPlan, 0, len(plans))
+	for _, p := range plans {
+		result = append(result, PublicPlan{
+			Id:               p.Id,
+			Title:            p.Title,
+			Subtitle:         p.Subtitle,
+			PriceAmount:      p.PriceAmount,
+			Currency:         p.Currency,
+			DurationUnit:     p.DurationUnit,
+			DurationValue:    p.DurationValue,
+			TotalAmount:      p.TotalAmount,
+			QuotaResetPeriod: p.QuotaResetPeriod,
+			UpgradeGroup:     p.UpgradeGroup,
+		})
+	}
+	common.ApiSuccess(c, result)
+}
+
 // ---- User APIs ----
 
 func GetSubscriptionPlans(c *gin.Context) {
