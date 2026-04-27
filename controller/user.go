@@ -1117,6 +1117,8 @@ func validateManageUserAction(myRole int, user *model.User, action string) error
 		}
 	case "enable":
 		return nil
+	case "add_quota":
+		return nil
 	case "delete":
 		if user.Role == common.RoleRootUser {
 			return errors.New(i18n.MsgUserCannotDeleteRootUser)
