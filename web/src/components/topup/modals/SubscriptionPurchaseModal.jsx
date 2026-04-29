@@ -28,8 +28,8 @@ import {
   Divider,
   Tooltip,
 } from '@douyinfe/semi-ui';
-import { Crown, CalendarClock, Package } from 'lucide-react';
-import { SiStripe } from 'react-icons/si';
+import { Crown, CalendarClock, Package, QrCode } from 'lucide-react';
+import { SiStripe, SiAlipay } from 'react-icons/si';
 import { IconCreditCard } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../helpers';
 import { getCurrencyConfig } from '../../../helpers/render';
@@ -54,10 +54,13 @@ const SubscriptionPurchaseModal = ({
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
+  enableAlipayNativeTopUp = false,
+  isMobileDevice = false,
   purchaseLimitInfo = null,
   onPayStripe,
   onPayCreem,
   onPayEpay,
+  onPayAlipay,
 }) => {
   const plan = selectedPlan?.plan;
   const totalAmount = Number(plan?.total_amount || 0);
@@ -71,7 +74,9 @@ const SubscriptionPurchaseModal = ({
   const hasStripe = enableStripeTopUp && !!plan?.stripe_price_id;
   const hasCreem = enableCreemTopUp && !!plan?.creem_product_id;
   const hasEpay = enableOnlineTopUp && epayMethods.length > 0;
-  const hasAnyPayment = hasStripe || hasCreem || hasEpay;
+  // 支付宝原生不依赖 plan 字段（按金额下单），开启即可用
+  const hasAlipay = enableAlipayNativeTopUp;
+  const hasAnyPayment = hasStripe || hasCreem || hasEpay || hasAlipay;
   const purchaseLimit = Number(purchaseLimitInfo?.limit || 0);
   const purchaseCount = Number(purchaseLimitInfo?.count || 0);
   const purchaseLimitReached =
@@ -278,6 +283,36 @@ const SubscriptionPurchaseModal = ({
                   >
                     {t('支付')}
                   </Button>
+                </div>
+              )}
+
+              {/* 支付宝原生 */}
+              {hasAlipay && (
+                <div className='flex gap-2'>
+                  <Button
+                    theme='solid'
+                    icon={<SiAlipay />}
+                    style={{ flex: 1, background: '#1677FF', borderColor: '#1677FF' }}
+                    onClick={() => onPayAlipay && onPayAlipay(isMobileDevice ? 'wap' : 'pc')}
+                    loading={paying}
+                    disabled={purchaseLimitReached}
+                  >
+                    {t('支付宝')}
+                  </Button>
+                  {/* 支付宝扫码（当面付）需开放平台签约「当面付」能力，未签约时隐藏 */}
+                  {false && !isMobileDevice && (
+                    <Button
+                      theme='light'
+                      type='primary'
+                      icon={<QrCode size={16} />}
+                      style={{ flex: 1 }}
+                      onClick={() => onPayAlipay && onPayAlipay('qr')}
+                      loading={paying}
+                      disabled={purchaseLimitReached}
+                    >
+                      {t('支付宝扫码')}
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

@@ -23,6 +23,7 @@ import {
   Button,
   Card,
   Divider,
+  Modal,
   Select,
   Skeleton,
   Space,
@@ -33,6 +34,7 @@ import {
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
 import { getCurrencyConfig } from '../../helpers/render';
 import { RefreshCw, Sparkles } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import SubscriptionPurchaseModal from './modals/SubscriptionPurchaseModal';
 import {
   formatSubscriptionAllowedGroups,
@@ -85,6 +87,7 @@ const SubscriptionPlansCard = ({
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
+  enableAlipayNativeTopUp = false,
   billingPreference,
   onChangeBillingPreference,
   activeSubscriptions = [],
@@ -99,6 +102,27 @@ const SubscriptionPlansCard = ({
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const openedInitialRef = useRef(false);
+
+  // 支付宝扫码弹窗（订阅）
+  const [aliQrOpen, setAliQrOpen] = useState(false);
+  const [aliQrData, setAliQrData] = useState({ qr: '', tradeNo: '', amount: '' });
+
+  const isMobileDevice =
+    typeof navigator !== 'undefined' &&
+    /Mobi|Android|iPhone|iPad|iPod|Mobile|Windows Phone|MicroMessenger|DingTalk|QQ\//i.test(
+      navigator.userAgent || '',
+    );
+  const openPaymentUrl = (url) => {
+    if (!url) return;
+    if (isMobileDevice) {
+      window.location.href = url;
+      return;
+    }
+    const newWin = window.open(url, '_blank');
+    if (!newWin) {
+      window.location.href = url;
+    }
+  };
 
   const epayMethods = useMemo(() => getEpayMethods(payMethods), [payMethods]);
 
@@ -182,6 +206,41 @@ const SubscriptionPlansCard = ({
           typeof res.data?.data === 'string'
             ? res.data.data
             : res.data?.message || t('支付失败');
+        showError(errorMsg);
+      }
+    } catch (e) {
+      showError(t('支付请求失败'));
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const payAlipay = async (clientType /* 'pc' | 'wap' | 'qr' */) => {
+    if (!selectedPlan?.plan?.id) return;
+    setPaying(true);
+    try {
+      const res = await API.post('/api/subscription/alipay/pay', {
+        plan_id: selectedPlan.plan.id,
+        client_type: clientType,
+      });
+      const body = res.data || {};
+      if (body.message === 'success') {
+        if (body.mode === 'qr') {
+          setAliQrData({
+            qr: body.data,
+            tradeNo: body.trade_no || '',
+            amount: body.total_fee || '',
+          });
+          setAliQrOpen(true);
+          closeBuy();
+        } else {
+          openPaymentUrl(body.data);
+          showSuccess(t('已发起支付'));
+          closeBuy();
+        }
+      } else {
+        const errorMsg =
+          typeof body.data === 'string' ? body.data : body.message || t('支付失败');
         showError(errorMsg);
       }
     } catch (e) {
@@ -725,6 +784,8 @@ const SubscriptionPlansCard = ({
         enableOnlineTopUp={enableOnlineTopUp}
         enableStripeTopUp={enableStripeTopUp}
         enableCreemTopUp={enableCreemTopUp}
+        enableAlipayNativeTopUp={enableAlipayNativeTopUp}
+        isMobileDevice={isMobileDevice}
         purchaseLimitInfo={
           selectedPlan?.plan?.id
             ? {
@@ -736,7 +797,41 @@ const SubscriptionPlansCard = ({
         onPayStripe={payStripe}
         onPayCreem={payCreem}
         onPayEpay={payEpay}
+        onPayAlipay={payAlipay}
       />
+
+      {/* 支付宝扫码付款（订阅）二维码弹窗 */}
+      <Modal
+        title={t('支付宝扫码付款')}
+        visible={aliQrOpen}
+        onCancel={() => setAliQrOpen(false)}
+        footer={null}
+        maskClosable={false}
+        size='small'
+        centered
+      >
+        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+          {aliQrData.qr ? (
+            <QRCodeSVG value={aliQrData.qr} size={240} includeMargin />
+          ) : null}
+          <div style={{ marginTop: 16, fontSize: 14, color: 'var(--semi-color-text-1)' }}>
+            {t('请使用支付宝 App 扫码付款')}
+          </div>
+          {aliQrData.amount ? (
+            <div style={{ marginTop: 4, fontSize: 13, color: 'var(--semi-color-text-2)' }}>
+              {t('应付金额')}：¥{aliQrData.amount}
+            </div>
+          ) : null}
+          {aliQrData.tradeNo ? (
+            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--semi-color-text-2)' }}>
+              {t('订单号')}：{aliQrData.tradeNo}
+            </div>
+          ) : null}
+          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--semi-color-text-2)' }}>
+            {t('支付完成后请刷新页面查看订阅状态')}
+          </div>
+        </div>
+      </Modal>
     </>
   );
 };
