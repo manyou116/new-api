@@ -1,29 +1,30 @@
+// 颜色全部使用 Semi UI 设计变量，使首页能自动适配亮/暗主题
 export const theme = {
   colors: {
     background: {
-      primary: '#ffffff', // Main bg
-      secondary: '#f8fafc', // Alternate bg
-      surface: '#ffffff', // Card bg
-      surfaceHover: '#f1f5f9',
+      primary: 'var(--semi-color-bg-0)',
+      secondary: 'var(--semi-color-bg-1)',
+      surface: 'var(--semi-color-bg-0)',
+      surfaceHover: 'var(--semi-color-fill-0)',
     },
     border: {
-      default: '#e2e8f0',
-      focus: '#cbd5e1',
-      active: '#a5b4fc', // Indigo subtle
+      default: 'var(--semi-color-border)',
+      focus: 'var(--semi-color-focus-border)',
+      active: 'var(--semi-color-primary-light-active)',
     },
     text: {
-      title: '#0f172a',
-      body: '#475569',
-      muted: '#64748b',
+      title: 'var(--semi-color-text-0)',
+      body: 'var(--semi-color-text-1)',
+      muted: 'var(--semi-color-text-2)',
     },
     primary: {
-      main: '#4f46e5', // Indigo
-      hover: '#4338ca',
-      light: '#e0e7ff',
+      main: 'var(--semi-color-primary)',
+      hover: 'var(--semi-color-primary-hover)',
+      light: 'var(--semi-color-primary-light-default)',
     },
     success: {
-      main: '#059669',
-      bg: '#ecfdf5',
+      main: 'var(--semi-color-success)',
+      bg: 'var(--semi-color-success-light-default)',
     },
   },
   shadows: {
@@ -48,18 +49,30 @@ export const theme = {
       fontWeight: 800,
       lineHeight: 1.15,
       letterSpacing: '-0.02em',
-      color: '#0f172a',
+      color: 'var(--semi-color-text-0)',
     },
     h2: {
       fontSize: 'clamp(1.8rem, 3vw, 2.5rem)',
       fontWeight: 800,
       lineHeight: 1.25,
       letterSpacing: '-0.025em',
-      color: '#0f172a',
+      color: 'var(--semi-color-text-0)',
     },
-    h3: { fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' },
-    body: { fontSize: '1rem', lineHeight: 1.7, color: '#475569' },
-    subtitle: { fontSize: '1.125rem', lineHeight: 1.6, color: '#64748b' },
-    small: { fontSize: '0.875rem', color: '#64748b' },
+    h3: {
+      fontSize: '1.25rem',
+      fontWeight: 700,
+      color: 'var(--semi-color-text-0)',
+    },
+    body: {
+      fontSize: '1rem',
+      lineHeight: 1.7,
+      color: 'var(--semi-color-text-1)',
+    },
+    subtitle: {
+      fontSize: '1.125rem',
+      lineHeight: 1.6,
+      color: 'var(--semi-color-text-2)',
+    },
+    small: { fontSize: '0.875rem', color: 'var(--semi-color-text-2)' },
   },
 };

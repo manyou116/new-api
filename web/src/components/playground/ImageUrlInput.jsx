@@ -104,7 +104,7 @@ const ImageUrlInput = ({
           <Image
             size={16}
             className={
-              imageEnabled && !disabled ? 'text-blue-500' : 'text-gray-400'
+              imageEnabled && !disabled ? 'text-blue-500' : 'text-semi-color-text-3'
             }
           />
           <Typography.Text strong className='text-sm'>
@@ -152,7 +152,7 @@ const ImageUrlInput = ({
       </div>
 
       {!imageEnabled ? (
-        <Typography.Text className='text-xs text-gray-500 mb-2 block'>
+        <Typography.Text className='text-xs text-semi-color-text-2 mb-2 block'>
           {description || (disabled
             ? t('图片功能在自定义请求体模式下不可用')
             : referenceMode
@@ -160,7 +160,7 @@ const ImageUrlInput = ({
               : t('启用后可添加图片URL进行多模态对话'))}
         </Typography.Text>
       ) : validImageUrls.length === 0 ? (
-        <Typography.Text className='text-xs text-gray-500 mb-2 block'>
+        <Typography.Text className='text-xs text-semi-color-text-2 mb-2 block'>
           {description || (disabled
             ? t('图片功能在自定义请求体模式下不可用')
             : referenceMode
@@ -168,7 +168,7 @@ const ImageUrlInput = ({
               : t('点击 + 按钮添加图片URL进行多模态对话'))}
         </Typography.Text>
       ) : (
-        <Typography.Text className='text-xs text-gray-500 mb-2 block'>
+        <Typography.Text className='text-xs text-semi-color-text-2 mb-2 block'>
           {description || `${t('已添加')} ${validImageUrls.length} ${referenceMode ? t('张参考图') : t('张图片')}`}
           {disabled ? ` (${t('自定义模式下不可用')})` : ''}
         </Typography.Text>
@@ -177,7 +177,7 @@ const ImageUrlInput = ({
       {referenceMode ? (
         <div className={`grid grid-cols-3 gap-2 max-h-40 overflow-y-auto image-list-scroll ${!imageEnabled || disabled ? 'opacity-50' : ''}`}>
           {validImageUrls.map((url, index) => (
-            <div key={`${url.slice(0, 32)}-${index}`} className='group relative aspect-square overflow-hidden rounded-lg border bg-gray-50'>
+            <div key={`${url.slice(0, 32)}-${index}`} className='group relative aspect-square overflow-hidden rounded-lg border bg-semi-color-fill-0'>
               <img
                 src={url}
                 alt={`${t('参考图')} ${index + 1}`}

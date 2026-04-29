@@ -150,7 +150,11 @@ const Home = () => {
   return (
     <div
       className='w-full overflow-x-hidden'
-      style={{ background: '#ffffff', minHeight: '100vh', color: '#0f172a' }}
+      style={{
+        background: 'var(--semi-color-bg-0)',
+        minHeight: '100vh',
+        color: 'var(--semi-color-text-0)',
+      }}
     >
       <NoticeModal
         visible={noticeVisible}

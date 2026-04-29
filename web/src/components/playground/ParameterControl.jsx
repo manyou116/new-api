@@ -55,7 +55,7 @@ const ParameterControl = ({
       >
         <div className='flex items-center justify-between mb-2'>
           <div className='flex items-center gap-2'>
-            <Thermometer size={16} className='text-gray-500' />
+            <Thermometer size={16} className='text-semi-color-text-2' />
             <Typography.Text strong className='text-sm'>
               Temperature
             </Typography.Text>
@@ -79,7 +79,7 @@ const ParameterControl = ({
             disabled={disabled}
           />
         </div>
-        <Typography.Text className='text-xs text-gray-500 mb-2'>
+        <Typography.Text className='text-xs text-semi-color-text-2 mb-2'>
           {t('控制输出的随机性和创造性')}
         </Typography.Text>
         <Slider
@@ -99,7 +99,7 @@ const ParameterControl = ({
       >
         <div className='flex items-center justify-between mb-2'>
           <div className='flex items-center gap-2'>
-            <Target size={16} className='text-gray-500' />
+            <Target size={16} className='text-semi-color-text-2' />
             <Typography.Text strong className='text-sm'>
               Top P
             </Typography.Text>
@@ -119,7 +119,7 @@ const ParameterControl = ({
             disabled={disabled}
           />
         </div>
-        <Typography.Text className='text-xs text-gray-500 mb-2'>
+        <Typography.Text className='text-xs text-semi-color-text-2 mb-2'>
           {t('核采样，控制词汇选择的多样性')}
         </Typography.Text>
         <Slider
@@ -139,7 +139,7 @@ const ParameterControl = ({
       >
         <div className='flex items-center justify-between mb-2'>
           <div className='flex items-center gap-2'>
-            <Repeat size={16} className='text-gray-500' />
+            <Repeat size={16} className='text-semi-color-text-2' />
             <Typography.Text strong className='text-sm'>
               Frequency Penalty
             </Typography.Text>
@@ -163,7 +163,7 @@ const ParameterControl = ({
             disabled={disabled}
           />
         </div>
-        <Typography.Text className='text-xs text-gray-500 mb-2'>
+        <Typography.Text className='text-xs text-semi-color-text-2 mb-2'>
           {t('频率惩罚，减少重复词汇的出现')}
         </Typography.Text>
         <Slider
@@ -183,7 +183,7 @@ const ParameterControl = ({
       >
         <div className='flex items-center justify-between mb-2'>
           <div className='flex items-center gap-2'>
-            <Ban size={16} className='text-gray-500' />
+            <Ban size={16} className='text-semi-color-text-2' />
             <Typography.Text strong className='text-sm'>
               Presence Penalty
             </Typography.Text>
@@ -207,7 +207,7 @@ const ParameterControl = ({
             disabled={disabled}
           />
         </div>
-        <Typography.Text className='text-xs text-gray-500 mb-2'>
+        <Typography.Text className='text-xs text-semi-color-text-2 mb-2'>
           {t('存在惩罚，鼓励讨论新话题')}
         </Typography.Text>
         <Slider
@@ -227,7 +227,7 @@ const ParameterControl = ({
       >
         <div className='flex items-center justify-between mb-2'>
           <div className='flex items-center gap-2'>
-            <Hash size={16} className='text-gray-500' />
+            <Hash size={16} className='text-semi-color-text-2' />
             <Typography.Text strong className='text-sm'>
               Max Tokens
             </Typography.Text>
@@ -266,11 +266,11 @@ const ParameterControl = ({
       >
         <div className='flex items-center justify-between mb-2'>
           <div className='flex items-center gap-2'>
-            <Shuffle size={16} className='text-gray-500' />
+            <Shuffle size={16} className='text-semi-color-text-2' />
             <Typography.Text strong className='text-sm'>
               Seed
             </Typography.Text>
-            <Typography.Text className='text-xs text-gray-400'>
+            <Typography.Text className='text-xs text-semi-color-text-3'>
               ({t('可选，用于复现结果')})
             </Typography.Text>
           </div>
