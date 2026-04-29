@@ -114,7 +114,7 @@ const CustomInputRender = (props) => {
   // 清空按钮
   const styledClearNode = clearContextNode
     ? React.cloneElement(clearContextNode, {
-        className: `!rounded-full !bg-gray-100 hover:!bg-red-500 hover:!text-white flex-shrink-0 transition-all ${clearContextNode.props.className || ''}`,
+        className: `!rounded-full !bg-semi-color-fill-1 hover:!bg-red-500 hover:!text-white flex-shrink-0 transition-all ${clearContextNode.props.className || ''}`,
         style: {
           ...clearContextNode.props.style,
           width: '32px',
@@ -228,7 +228,7 @@ const CustomInputRender = (props) => {
             {validImages.map(({ url, index }) => (
               <div
                 key={`${url.slice(0, 32)}-${index}`}
-                className='group relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-white bg-white shadow-sm'
+                className='group relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-white bg-semi-color-bg-0 shadow-sm'
               >
                 <img
                   src={url}
@@ -268,12 +268,12 @@ const CustomInputRender = (props) => {
         </div>
       )}
       {canGenerateImage && (
-        <div className='mb-2 rounded-xl border border-gray-100 bg-white p-2 shadow-sm'>
-          <div className='mb-2 flex items-center gap-2 text-xs font-medium text-gray-600'>
+        <div className='mb-2 rounded-xl border border-semi-color-border bg-semi-color-bg-0 p-2 shadow-sm'>
+          <div className='mb-2 flex items-center gap-2 text-xs font-medium text-semi-color-text-1'>
             <SlidersHorizontal size={13} />
             <span>{t('图片参数')}</span>
             {canEditImage && validImageCount === 0 && (
-              <span className='font-normal text-gray-400'>
+              <span className='font-normal text-semi-color-text-3'>
                 {t('上传或粘贴参考图后自动参考生成')}
               </span>
             )}
@@ -309,7 +309,7 @@ const CustomInputRender = (props) => {
         </div>
       )}
       <div
-        className='flex flex-wrap items-center gap-2 sm:gap-3 p-2 bg-gray-50 rounded-xl sm:rounded-2xl shadow-sm hover:shadow-md transition-shadow'
+        className='flex flex-wrap items-center gap-2 sm:gap-3 p-2 bg-semi-color-fill-0 rounded-xl sm:rounded-2xl shadow-sm hover:shadow-md transition-shadow'
         style={{ border: '1px solid var(--semi-color-border)' }}
         onClick={onClick}
         title={t('支持 Ctrl+V 粘贴图片')}

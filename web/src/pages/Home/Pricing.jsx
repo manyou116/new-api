@@ -154,10 +154,9 @@ const PricingAndTutorial = () => {
             style={{
               display: 'inline-flex',
               padding: 4,
-              background: theme.colors.background.surface,
+              background: 'var(--semi-color-fill-0)',
               border: `1px solid ${theme.colors.border.default}`,
               borderRadius: theme.radius.md,
-              boxShadow: theme.shadows.sm,
             }}
           >
             {tabItems.map((item) => {
@@ -174,7 +173,9 @@ const PricingAndTutorial = () => {
                     background: isActive
                       ? theme.colors.primary.main
                       : 'transparent',
-                    color: isActive ? '#fff' : theme.colors.text.body,
+                    color: isActive
+                      ? 'var(--semi-color-white)'
+                      : theme.colors.text.body,
                     fontWeight: 700,
                     cursor: 'pointer',
                     transition: 'all 0.2s',
@@ -305,7 +306,7 @@ const PricingAndTutorial = () => {
                       background: card.featured
                         ? theme.colors.primary.main
                         : theme.colors.text.title,
-                      color: '#fff',
+                      color: card.featured ? 'var(--semi-color-white)' : 'var(--semi-color-bg-0)',
                       width: '100%',
                       height: 48,
                       borderRadius: theme.radius.md,
@@ -444,7 +445,7 @@ const PricingAndTutorial = () => {
                       background: card.featured
                         ? theme.colors.primary.main
                         : theme.colors.text.title,
-                      color: '#fff',
+                      color: card.featured ? 'var(--semi-color-white)' : 'var(--semi-color-bg-0)',
                       width: '100%',
                       height: 48,
                       borderRadius: theme.radius.md,

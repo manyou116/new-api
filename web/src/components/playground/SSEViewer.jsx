@@ -152,7 +152,7 @@ const SSEViewer = ({ sseData }) => {
               {t('解析错误')}: {item.error}
             </Typography.Text>
           </div>
-          <div className='p-3 bg-gray-100 dark:bg-gray-800 rounded-lg font-mono text-xs overflow-auto'>
+          <div className='p-3 bg-semi-color-fill-1 dark:bg-gray-800 rounded-lg font-mono text-xs overflow-auto'>
             <pre>{item.raw}</pre>
           </div>
         </div>
@@ -171,7 +171,7 @@ const SSEViewer = ({ sseData }) => {
             size='small'
             theme='borderless'
             onClick={() => handleCopySingle(item)}
-            className='absolute top-2 right-2 !bg-gray-800/80 !text-gray-300 hover:!bg-gray-700'
+            className='absolute top-2 right-2 !bg-gray-800/80 !text-semi-color-disabled-text hover:!bg-gray-700'
           />
         </div>
 
@@ -207,16 +207,16 @@ const SSEViewer = ({ sseData }) => {
 
   if (!parsedSSEData || parsedSSEData.length === 0) {
     return (
-      <div className='flex items-center justify-center h-full min-h-[200px] text-gray-500'>
+      <div className='flex items-center justify-center h-full min-h-[200px] text-semi-color-text-2'>
         <span>{t('暂无SSE响应数据')}</span>
       </div>
     );
   }
 
   return (
-    <div className='h-full flex flex-col bg-gray-50 dark:bg-gray-900/50 rounded-lg'>
+    <div className='h-full flex flex-col bg-semi-color-fill-0 dark:bg-gray-900/50 rounded-lg'>
       {/* 头部工具栏 */}
-      <div className='flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0'>
+      <div className='flex items-center justify-between p-4 border-b border-semi-color-border dark:border-gray-700 flex-shrink-0'>
         <div className='flex items-center gap-3'>
           <Zap size={16} className='text-blue-500' />
           <Typography.Text strong>{t('SSE数据流')}</Typography.Text>
@@ -270,7 +270,7 @@ const SSEViewer = ({ sseData }) => {
           activeKey={expandedKeys}
           onChange={setExpandedKeys}
           accordion={false}
-          className='bg-white dark:bg-gray-800 rounded-lg'
+          className='bg-semi-color-bg-0 dark:bg-gray-800 rounded-lg'
         >
           {parsedSSEData.map((item) => (
             <Collapse.Panel
@@ -284,13 +284,13 @@ const SSEViewer = ({ sseData }) => {
                     <span className='text-red-600'>{t('解析错误')}</span>
                   ) : (
                     <>
-                      <span className='text-gray-600'>
+                      <span className='text-semi-color-text-1'>
                         {item.parsed?.id ||
                           item.parsed?.object ||
                           t('SSE 事件')}
                       </span>
                       {item.parsed?.choices?.[0]?.delta && (
-                        <span className='text-xs text-gray-400'>
+                        <span className='text-xs text-semi-color-text-3'>
                           •{' '}
                           {Object.keys(item.parsed.choices[0].delta)
                             .filter((k) => item.parsed.choices[0].delta[k])

@@ -497,7 +497,7 @@ ${extraConfigContent}`
                   border: `1px solid ${theme.colors.border.default}`,
                   borderRadius: theme.radius.md,
                   padding: 16,
-                  background: '#fff',
+                  background: 'var(--semi-color-bg-0)',
                   boxShadow: theme.shadows.sm,
                 }}
               >
@@ -563,7 +563,10 @@ ${extraConfigContent}`
                       : `1px solid ${theme.colors.border.default}`,
                   borderRadius: theme.radius.md,
                   padding: 16,
-                  background: tool.id === activeTool.id ? '#fff' : '#f8fafc',
+                  background:
+                    tool.id === activeTool.id
+                      ? 'var(--semi-color-bg-0)'
+                      : 'var(--semi-color-fill-0)',
                   boxShadow:
                     tool.id === activeTool.id
                       ? theme.shadows.md
@@ -621,7 +624,7 @@ ${extraConfigContent}`
                     ? `1px solid ${tool.accent}`
                     : `1px solid ${theme.colors.border.default}`,
                   background: active
-                    ? '#ffffff'
+                    ? 'var(--semi-color-bg-0)'
                     : theme.colors.background.surface,
                   borderRadius: theme.radius.md,
                   padding: 18,
@@ -701,7 +704,7 @@ ${extraConfigContent}`
                     background:
                       platform.id === activePlatform.id
                         ? theme.colors.primary.light
-                        : '#fff',
+                        : 'var(--semi-color-bg-0)',
                     color:
                       platform.id === activePlatform.id
                         ? theme.colors.primary.main
@@ -735,8 +738,13 @@ ${extraConfigContent}`
                         ? `1px solid ${theme.colors.text.title}`
                         : `1px solid ${theme.colors.border.default}`,
                     background:
-                      item.id === mode ? theme.colors.text.title : '#fff',
-                    color: item.id === mode ? '#fff' : theme.colors.text.body,
+                      item.id === mode
+                        ? theme.colors.text.title
+                        : 'var(--semi-color-bg-0)',
+                    color:
+                      item.id === mode
+                        ? 'var(--semi-color-bg-0)'
+                        : theme.colors.text.body,
                     borderRadius: theme.radius.sm,
                     padding: '8px 12px',
                     fontWeight: 700,
@@ -761,7 +769,7 @@ ${extraConfigContent}`
                       padding: 14,
                       border: `1px solid ${theme.colors.border.default}`,
                       borderRadius: theme.radius.md,
-                      background: '#fff',
+                      background: 'var(--semi-color-bg-0)',
                     }}
                   >
                     <div
@@ -829,7 +837,7 @@ ${extraConfigContent}`
 
           <div
             style={{
-              background: '#fff',
+              background: 'var(--semi-color-bg-0)',
               border: `1px solid ${theme.colors.border.default}`,
               borderRadius: theme.radius.md,
               padding: 24,
@@ -1010,7 +1018,7 @@ ${extraConfigContent}`
                 marginTop: 18,
                 padding: 14,
                 borderRadius: theme.radius.md,
-                background: '#fffbeb',
+                background: 'var(--semi-color-warning-light-default)',
                 border: '1px solid #fde68a',
                 display: 'flex',
                 gap: 10,

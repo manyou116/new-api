@@ -47,7 +47,8 @@ const Hero = () => {
       style={{
         position: 'relative',
         padding: '120px 24px 80px',
-        background: 'linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%)',
+        background:
+          'linear-gradient(180deg, var(--semi-color-bg-1) 0%, var(--semi-color-bg-0) 100%)',
         overflow: 'hidden',
         borderBottom: `1px solid ${theme.colors.border.default}`,
       }}
@@ -163,7 +164,7 @@ const Hero = () => {
               fontSize: 18,
               fontWeight: 600,
               borderRadius: theme.radius.md,
-              background: '#fff',
+              background: 'var(--semi-color-bg-0)',
               color: theme.colors.text.title,
               border: `1px solid ${theme.colors.border.default}`,
               boxShadow: theme.shadows.sm,
@@ -214,7 +215,7 @@ const Hero = () => {
               key={item.label}
               style={{
                 textAlign: 'left',
-                background: '#fff',
+                background: 'var(--semi-color-bg-0)',
                 border: `1px solid ${theme.colors.border.default}`,
                 borderRadius: theme.radius.lg,
                 padding: 20,
