@@ -104,20 +104,83 @@ func RequestAlipayNative(c *gin.Context) {
 		return
 	}
 
-	var p alipay.TradePagePay
 	callbackAddress := strings.TrimRight(service.GetCallbackAddress(), "/")
-	p.NotifyURL = callbackAddress + "/api/user/alipay/notify"
-	p.ReturnURL = callbackAddress + "/api/user/alipay/return"
-	p.Subject = "API平台算力额度充值"
-	p.OutTradeNo = tradeNo
-	p.TotalAmount = fmt.Sprintf("%.2f", payMoney)
-	p.ProductCode = "FAST_INSTANT_TRADE_PAY"
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("支付宝充值订单创建 user_id=%d trade_no=%s amount=%d money=%.2f notify_url=%q return_url=%q production=%t", userId, tradeNo, requestAmount, payMoney, p.NotifyURL, p.ReturnURL, setting.AlipayProduction))
+	notifyURL := callbackAddress + "/api/user/alipay/notify"
+	returnURL := callbackAddress + "/api/user/alipay/return"
 
-	payURL, err := client.TradePagePay(p)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+	// 客户端类型判断：优先取请求字段 client_type（pc / wap / qr）；缺省时按 User-Agent 自动识别
+	clientType := strings.ToLower(strings.TrimSpace(c.PostForm("client_type")))
+	if clientType == "" {
+		ua := strings.ToLower(c.Request.UserAgent())
+		if strings.Contains(ua, "mobi") || strings.Contains(ua, "android") ||
+			strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad") ||
+			strings.Contains(ua, "ipod") || strings.Contains(ua, "windows phone") ||
+			strings.Contains(ua, "micromessenger") {
+			clientType = "wap"
+		} else {
+			clientType = "pc"
+		}
+	}
+
+	// 当面付预下单（扫码场景）：返回 qr_code 字符串，前端自行渲染二维码
+	if clientType == "qr" {
+		var p alipay.TradePreCreate
+		p.NotifyURL = notifyURL
+		p.Subject = "API平台算力额度充值"
+		p.OutTradeNo = tradeNo
+		p.TotalAmount = fmt.Sprintf("%.2f", payMoney)
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("支付宝充值订单创建[QR] user_id=%d trade_no=%s amount=%d money=%.2f notify_url=%q production=%t", userId, tradeNo, requestAmount, payMoney, p.NotifyURL, setting.AlipayProduction))
+		rsp, err := client.TradePreCreate(c.Request.Context(), p)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+			return
+		}
+		if rsp.IsFailure() {
+			c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("%s: %s", rsp.Msg, rsp.SubMsg)})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "success",
+			"success":   true,
+			"data":      rsp.QRCode,
+			"mode":      "qr",
+			"trade_no":  tradeNo,
+			"total_fee": fmt.Sprintf("%.2f", payMoney),
+		})
 		return
+	}
+
+	var payURL fmt.Stringer
+	if clientType == "wap" {
+		var p alipay.TradeWapPay
+		p.NotifyURL = notifyURL
+		p.ReturnURL = returnURL
+		p.Subject = "API平台算力额度充值"
+		p.OutTradeNo = tradeNo
+		p.TotalAmount = fmt.Sprintf("%.2f", payMoney)
+		p.ProductCode = "QUICK_WAP_WAY"
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("支付宝充值订单创建[WAP] user_id=%d trade_no=%s amount=%d money=%.2f notify_url=%q return_url=%q production=%t", userId, tradeNo, requestAmount, payMoney, p.NotifyURL, p.ReturnURL, setting.AlipayProduction))
+		u, err := client.TradeWapPay(p)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+			return
+		}
+		payURL = u
+	} else {
+		var p alipay.TradePagePay
+		p.NotifyURL = notifyURL
+		p.ReturnURL = returnURL
+		p.Subject = "API平台算力额度充值"
+		p.OutTradeNo = tradeNo
+		p.TotalAmount = fmt.Sprintf("%.2f", payMoney)
+		p.ProductCode = "FAST_INSTANT_TRADE_PAY"
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("支付宝充值订单创建[PC] user_id=%d trade_no=%s amount=%d money=%.2f notify_url=%q return_url=%q production=%t", userId, tradeNo, requestAmount, payMoney, p.NotifyURL, p.ReturnURL, setting.AlipayProduction))
+		u, err := client.TradePagePay(p)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+			return
+		}
+		payURL = u
 	}
 
 	c.JSON(http.StatusOK, gin.H{

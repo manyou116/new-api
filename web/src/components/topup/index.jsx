@@ -30,6 +30,7 @@ import {
   getQuotaPerUnit,
 } from '../../helpers';
 import { Modal, Toast } from '@douyinfe/semi-ui';
+import { QRCodeSVG } from 'qrcode.react';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -87,8 +88,29 @@ const TopUp = () => {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [payMethods, setPayMethods] = useState([]);
 
+  // 支付宝扫码（PC 端当面付预下单）
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [qrModalData, setQrModalData] = useState({ qr: '', tradeNo: '', amount: '' });
+
   const affFetchedRef = useRef(false);
   const autoCheckoutRef = useRef(false);
+
+  const isMobileDevice =
+    typeof navigator !== 'undefined' &&
+    /Mobi|Android|iPhone|iPad|iPod|Mobile|Windows Phone|MicroMessenger|DingTalk|QQ\//i.test(
+      navigator.userAgent || '',
+    );
+  const openPaymentUrl = (url) => {
+    if (!url) return;
+    if (isMobileDevice) {
+      window.location.href = url;
+      return;
+    }
+    const newWin = window.open(url, '_blank');
+    if (!newWin) {
+      window.location.href = url;
+    }
+  };
 
   // 邀请相关状态
   const [affLink, setAffLink] = useState('');
@@ -127,8 +149,20 @@ const TopUp = () => {
     })),
   ];
 
+  // PC 端「支付宝扫码」入口需要支付宝开放平台签约「当面付」能力，未签约时禁用
+  if (false && enableAlipayNativeTopUp && !isMobileDevice) {
+    const aliTile = payMethods.find((m) => m?.type === 'alipay_native');
+    allConfirmPayMethods.push({
+      ...(aliTile || {}),
+      type: 'alipay_qr',
+      name: '支付宝扫码',
+      color: aliTile?.color || 'rgba(var(--semi-primary-5), 1)',
+    });
+  }
+
   const isPaymentEnabled = (payment) => {
     if (payment === 'alipay_native') return enableAlipayNativeTopUp;
+    if (payment === 'alipay_qr') return enableAlipayNativeTopUp && !isMobileDevice;
     if (payment === 'stripe') return enableStripeTopUp;
     if (payment === 'waffo_pancake') return enableWaffoPancakeTopUp;
     if (typeof payment === 'string' && payment.startsWith('waffo:')) {
@@ -239,7 +273,7 @@ const TopUp = () => {
         showError(t('管理员未开启 Waffo 充值！'));
         return;
       }
-    } else if (payment === 'alipay_native') {
+    } else if (payment === 'alipay_native' || payment === 'alipay_qr') {
       if (!enableAlipayNativeTopUp) {
         showError(t('管理员未开启支付宝原生充值！'));
         return;
@@ -337,10 +371,15 @@ const TopUp = () => {
           amount: parseInt(topUpCount),
           payment_method: 'stripe',
         });
-      } else if (payWay === 'alipay_native') {
-        // 支付宝原生 SDK — 返回跳转 URL
+      } else if (payWay === 'alipay_native' || payWay === 'alipay_qr') {
+        // 支付宝原生 SDK — alipay_native 返回跳转 URL；alipay_qr 返回二维码字符串
         const formData = new FormData();
         formData.append('amount', topUpCount.toString());
+        if (payWay === 'alipay_qr') {
+          formData.append('client_type', 'qr');
+        } else {
+          formData.append('client_type', isMobileDevice ? 'wap' : 'pc');
+        }
         res = await API.post('/api/user/alipay/pay', formData);
       } else {
         // 普通支付请求（易支付 epay）
@@ -354,11 +393,18 @@ const TopUp = () => {
         const { message, data } = res.data;
         if (message === 'success') {
           if (payWay === 'stripe') {
-            // Stripe 支付回调处理
-            window.open(data.pay_link, '_blank');
+            openPaymentUrl(data.pay_link);
+          } else if (payWay === 'alipay_qr') {
+            // 当面付二维码：弹窗渲染，让用户扫码
+            setQrModalData({
+              qr: data,
+              tradeNo: res.data.trade_no || '',
+              amount: res.data.total_fee || '',
+            });
+            setQrModalOpen(true);
+            setOpen(false);
           } else if (payWay === 'alipay_native') {
-            // 支付宝原生 — 直接跳转到支付宝收银台
-            window.open(data, '_blank');
+            openPaymentUrl(data);
           } else {
             // 普通支付表单提交
             let params = data;
@@ -369,7 +415,7 @@ const TopUp = () => {
             let isSafari =
               navigator.userAgent.indexOf('Safari') > -1 &&
               navigator.userAgent.indexOf('Chrome') < 1;
-            if (!isSafari) {
+            if (!isSafari && !isMobileDevice) {
               form.target = '_blank';
             }
             for (let key in params) {
@@ -461,7 +507,7 @@ const TopUp = () => {
       if (res !== undefined) {
         const { message, data } = res.data;
         if (message === 'success' && data?.payment_url) {
-          window.open(data.payment_url, '_blank');
+          openPaymentUrl(data.payment_url);
         } else {
           showError(data || t('支付请求失败'));
         }
@@ -521,7 +567,7 @@ const TopUp = () => {
         if (message === 'success') {
           const checkoutUrl = data?.checkout_url || '';
           if (checkoutUrl) {
-            window.open(checkoutUrl, '_blank');
+            openPaymentUrl(checkoutUrl);
           } else {
             showError(t('支付请求失败'));
           }
@@ -570,8 +616,7 @@ const TopUp = () => {
   };
 
   const processCreemCallback = (data) => {
-    // 与 Stripe 保持一致的实现方式
-    window.open(data.checkout_url, '_blank');
+    openPaymentUrl(data.checkout_url);
   };
 
   const getUserQuota = async () => {
@@ -1020,6 +1065,39 @@ const TopUp = () => {
         onCancel={handleHistoryCancel}
         t={t}
       />
+
+      {/* 支付宝扫码付款（当面付）二维码弹窗 */}
+      <Modal
+        title={t('支付宝扫码付款')}
+        visible={qrModalOpen}
+        onCancel={() => setQrModalOpen(false)}
+        footer={null}
+        maskClosable={false}
+        size='small'
+        centered
+      >
+        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+          {qrModalData.qr ? (
+            <QRCodeSVG value={qrModalData.qr} size={240} includeMargin />
+          ) : null}
+          <div style={{ marginTop: 16, fontSize: 14, color: 'var(--semi-color-text-1)' }}>
+            {t('请使用支付宝 App 扫码付款')}
+          </div>
+          {qrModalData.amount ? (
+            <div style={{ marginTop: 4, fontSize: 13, color: 'var(--semi-color-text-2)' }}>
+              {t('应付金额')}：¥{qrModalData.amount}
+            </div>
+          ) : null}
+          {qrModalData.tradeNo ? (
+            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--semi-color-text-2)' }}>
+              {t('订单号')}：{qrModalData.tradeNo}
+            </div>
+          ) : null}
+          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--semi-color-text-2)' }}>
+            {t('支付完成后请在「充值记录」中查看到账状态')}
+          </div>
+        </div>
+      </Modal>
 
       {/* Creem 充值确认模态框 */}
       <Modal

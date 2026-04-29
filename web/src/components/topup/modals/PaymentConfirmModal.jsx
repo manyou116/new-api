@@ -44,7 +44,7 @@ const PaymentConfirmModal = ({
   const discountAmount = hasDiscount ? originalAmount - amountNumber : 0;
   const renderPayMethodIcon = (payMethod, size = 16) => {
     if (!payMethod) return null;
-    if (payMethod.type === 'alipay') {
+    if (payMethod.type === 'alipay' || payMethod.type === 'alipay_native' || payMethod.type === 'alipay_qr') {
       return <SiAlipay size={size} color='#1677FF' />;
     }
     if (payMethod.type === 'wxpay') {
