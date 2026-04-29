@@ -56,6 +56,13 @@ import {
   showSuccess,
 } from '../../helpers';
 import { renderQuota } from '../../helpers/render';
+import {
+  loadHistory,
+  saveItems,
+  updateCost as updateHistoryCost,
+  deleteItem as deleteHistoryItem,
+  clearHistory as clearAllHistory,
+} from '../../helpers/imageHistory';
 import { UserContext } from '../../context/User';
 
 const { Text, Title } = Typography;
@@ -89,7 +96,9 @@ const ImageStudio = () => {
   const [groups, setGroups] = useState([]);
   const [models, setModels] = useState([]);
   const [group, setGroup] = useState('');
-  const [model, setModel] = useState('gpt-image-2');
+  const [model, setModel] = useState('');
+  const [imageModelsByGroup, setImageModelsByGroup] = useState({}); // groupValue -> imageModelOption[]
+  const [groupHasNoImageModel, setGroupHasNoImageModel] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [size, setSize] = useState('1024x1024');
   const [n, setN] = useState(1);
@@ -131,6 +140,9 @@ const ImageStudio = () => {
   const removeRef = (idx) =>
     setRefFiles((prev) => prev.filter((_, i) => i !== idx));
 
+  const LS_LAST_GROUP = 'image_studio.last_group';
+  const LS_LAST_MODEL = 'image_studio.last_model';
+
   const loadGroups = useCallback(async () => {
     try {
       const res = await API.get('/api/user/self/groups');
@@ -141,32 +153,37 @@ const ImageStudio = () => {
           JSON.parse(localStorage.getItem('user') || '{}')?.group;
         const opts = processGroupsData(data || {}, userGroup);
         setGroups(opts);
-        if (opts.length > 0 && !group) setGroup(opts[0].value);
+        return opts;
       }
     } catch (e) {}
-  }, [userState?.user?.group, group]);
+    return [];
+  }, [userState?.user?.group]);
 
-  const loadModels = useCallback(
-    async (g) => {
-      try {
-        const q = g ? `?group=${encodeURIComponent(g)}` : '';
-        const res = await API.get(`/api/user/models${q}`);
-        const { success, data } = res.data;
-        if (success) {
-          const { modelOptions } = processModelsData(data, model);
-          const imageOnly = modelOptions.filter(isImageGenModel);
-          setModels(imageOnly);
-          if (imageOnly.length > 0 && !imageOnly.some((m) => m.value === model)) {
-            setModel(imageOnly[0].value);
-          }
-        }
-      } catch (e) {}
-    },
-    [model],
-  );
+  const fetchImageModelsForGroup = useCallback(async (g) => {
+    try {
+      const q = g ? `?group=${encodeURIComponent(g)}` : '';
+      const res = await API.get(`/api/user/models${q}`);
+      const { success, data } = res.data;
+      if (success) {
+        const { modelOptions } = processModelsData(data, '');
+        return modelOptions.filter(isImageGenModel);
+      }
+    } catch (e) {}
+    return [];
+  }, []);
+
+  const pickPreferredModel = (imageModels) => {
+    if (!imageModels || imageModels.length === 0) return '';
+    const lastModel = localStorage.getItem(LS_LAST_MODEL);
+    if (lastModel && imageModels.some((m) => m.value === lastModel)) {
+      return lastModel;
+    }
+    const gpt = imageModels.find((m) => m.value === 'gpt-image-2');
+    if (gpt) return gpt.value;
+    return imageModels[0].value;
+  };
 
   useEffect(() => {
-    loadGroups();
     // 拉取价格表
     (async () => {
       try {
@@ -181,13 +198,90 @@ const ImageStudio = () => {
         }
       } catch (e) {}
     })();
+
+    // 智能初始化：拉所有分组并并行扫描每个分组的图像模型，挑选最优默认
+    (async () => {
+      const opts = await loadGroups();
+      if (!opts || opts.length === 0) return;
+
+      const results = await Promise.all(
+        opts.map(async (g) => [g.value, await fetchImageModelsForGroup(g.value)]),
+      );
+      const map = {};
+      results.forEach(([g, list]) => {
+        map[g] = list;
+      });
+      setImageModelsByGroup(map);
+
+      const lastGroup = localStorage.getItem(LS_LAST_GROUP);
+      const userGroup =
+        userState?.user?.group ||
+        JSON.parse(localStorage.getItem('user') || '{}')?.group;
+      const groupHasImage = (g) => Array.isArray(map[g]) && map[g].length > 0;
+
+      let chosenGroup = '';
+      if (lastGroup && opts.some((o) => o.value === lastGroup) && groupHasImage(lastGroup)) {
+        chosenGroup = lastGroup;
+      } else if (userGroup && opts.some((o) => o.value === userGroup) && groupHasImage(userGroup)) {
+        chosenGroup = userGroup;
+      } else {
+        const firstWithImage = opts.find((o) => groupHasImage(o.value));
+        chosenGroup = firstWithImage ? firstWithImage.value : opts[0].value;
+      }
+
+      setGroup(chosenGroup);
+      const list = map[chosenGroup] || [];
+      setModels(list);
+      setGroupHasNoImageModel(list.length === 0);
+      if (list.length > 0) {
+        setModel(pickPreferredModel(list));
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 用户切换分组：从已聚合的 map 取模型；按优先级选 model；写入 localStorage
   useEffect(() => {
-    loadModels(group);
+    if (!group) return;
+    localStorage.setItem(LS_LAST_GROUP, group);
+    if (Object.keys(imageModelsByGroup).length === 0) return;
+    const list = imageModelsByGroup[group] || [];
+    setModels(list);
+    setGroupHasNoImageModel(list.length === 0);
+    if (list.length === 0) {
+      setModel('');
+      return;
+    }
+    if (!list.some((m) => m.value === model)) {
+      setModel(pickPreferredModel(list));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group]);
+  }, [group, imageModelsByGroup]);
+
+  // 用户切换模型：写入 localStorage
+  useEffect(() => {
+    if (model) localStorage.setItem(LS_LAST_MODEL, model);
+  }, [model]);
+
+  // 当用户 id 就绪时从 IndexedDB 恢复历史生成记录（避免 mount 时 id 还未加载导致读到错误的桶）
+  const historyLoadedRef = useRef(false);
+  useEffect(() => {
+    const uid = userState?.user?.id;
+    if (uid == null || historyLoadedRef.current) return;
+    historyLoadedRef.current = true;
+    (async () => {
+      try {
+        const list = await loadHistory(uid);
+        if (Array.isArray(list) && list.length > 0) {
+          setResults((prev) => {
+            const existIds = new Set(prev.map((x) => x.id));
+            const merged = [...prev, ...list.filter((x) => !existIds.has(x.id))];
+            return merged;
+          });
+        }
+      } catch (e) {}
+    })();
+  }, [userState?.user?.id]);
 
   const canGenerate = useMemo(() => {
     if (loading || !model || !prompt.trim()) return false;
@@ -304,26 +398,56 @@ const ImageStudio = () => {
       setResults((prev) => [...newItems, ...prev]);
       showSuccess(t('生成成功'));
 
-      // 刷新用户余额并计算本次消耗，回填到 batch
-      const before = Number(userState?.user?.quota || 0);
-      setTimeout(async () => {
-        try {
-          const r = await API.get('/api/user/self');
-          if (r.data?.success && r.data?.data) {
+      // 持久化到 IndexedDB
+      saveItems(userState?.user?.id, newItems);
+
+      const requestId =
+        res?.headers?.['x-oneapi-request-id'] ||
+        res?.headers?.['X-Oneapi-Request-Id'] ||
+        '';
+
+      // 异步刷新用户余额；同时按 request_id 从日志拉取真实记账金额，确保与「使用日志」绝对一致
+      API.get('/api/user/self')
+        .then((r) => {
+          if (r?.data?.success && r?.data?.data) {
             userDispatch({ type: 'login', payload: r.data.data });
-            const after = Number(r.data.data.quota || 0);
-            const diff = before - after;
-            if (diff > 0) {
-              setLastCost(diff);
-              setResults((prev) =>
-                prev.map((it) =>
-                  it.batchId === batchId ? { ...it, cost: diff } : it,
-                ),
-              );
-            }
           }
-        } catch (e) {}
-      }, 600);
+        })
+        .catch(() => {});
+
+      if (requestId) {
+        const fetchRealCost = async () => {
+          for (let i = 0; i < 6; i++) {
+            await new Promise((rs) => setTimeout(rs, i === 0 ? 800 : 1200));
+            try {
+              const lr = await API.get('/api/log/self', {
+                params: { p: 1, page_size: 10, request_id: requestId },
+              });
+              const items =
+                lr?.data?.data?.items ||
+                lr?.data?.data?.records ||
+                lr?.data?.data ||
+                [];
+              const list = Array.isArray(items) ? items : [];
+              const matched = list.find(
+                (x) => x && (x.request_id === requestId || x.requestId === requestId),
+              );
+              if (matched && typeof matched.quota === 'number') {
+                const real = matched.quota;
+                setLastCost(real);
+                setResults((prev) =>
+                  prev.map((it) =>
+                    it.batchId === batchId ? { ...it, cost: real } : it,
+                  ),
+                );
+                updateHistoryCost(userState?.user?.id, batchId, real);
+                return;
+              }
+            } catch (e) {}
+          }
+        };
+        fetchRealCost();
+      }
     } catch (e) {
       const msg =
         e?.response?.data?.error?.message ||
@@ -378,6 +502,7 @@ const ImageStudio = () => {
 
   const removeOne = (id) => {
     setResults((prev) => prev.filter((x) => x.id !== id));
+    deleteHistoryItem(userState?.user?.id, id);
   };
 
   // 把结果图作为参考图加入 i2i 上传列表
@@ -418,7 +543,10 @@ const ImageStudio = () => {
     }
   };
 
-  const clearAll = () => setResults([]);
+  const clearAll = () => {
+    setResults([]);
+    clearAllHistory(userState?.user?.id);
+  };
 
   return (
     <div className='mt-[60px] px-3 sm:px-6 pb-10 max-w-[1600px] mx-auto'>
@@ -522,6 +650,39 @@ const ImageStudio = () => {
                 />
               </div>
             </div>
+
+            {groupHasNoImageModel && (() => {
+              const candidates = Object.entries(imageModelsByGroup)
+                .filter(([, list]) => Array.isArray(list) && list.length > 0)
+                .map(([g]) => g);
+              return (
+                <div className='rounded-xl px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200/60 dark:border-amber-800/40'>
+                  <Text size='small' type='warning'>
+                    {t('当前分组「{{g}}」没有可用的图像生成模型。', { g: group })}
+                  </Text>
+                  {candidates.length > 0 ? (
+                    <div className='mt-1 flex flex-wrap items-center gap-2'>
+                      <Text size='small' type='tertiary'>{t('可切换到：')}</Text>
+                      {candidates.map((g) => (
+                        <Button
+                          key={g}
+                          size='small'
+                          theme='light'
+                          type='warning'
+                          onClick={() => setGroup(g)}
+                        >
+                          {g}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <Text size='small' type='tertiary' className='block mt-1'>
+                      {t('您的所有可用分组均无图像模型，请联系管理员开通。')}
+                    </Text>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Prompt - 主角 */}
             <div>
