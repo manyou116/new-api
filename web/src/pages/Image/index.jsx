@@ -116,6 +116,9 @@ const ImageStudio = () => {
   const [refFiles, setRefFiles] = useState([]); // File[]
   const fileInputRef = useRef(null);
   const [refPreviews, setRefPreviews] = useState([]); // string[] dataURL
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
+  const [downloadingAll, setDownloadingAll] = useState(false);
 
   // 当 refFiles 变化时生成预览 URL
   useEffect(() => {
@@ -129,16 +132,104 @@ const ImageStudio = () => {
     return () => revoked.forEach((u) => URL.revokeObjectURL(u));
   }, [refFiles]);
 
+  // 统一往参考图列表追加图片：自动切到 i2i、限制 6 张、提示溢出
+  const appendRefFiles = useCallback(
+    (rawFiles, opts = {}) => {
+      const files = Array.from(rawFiles || []).filter(
+        (f) => f && f.type && f.type.startsWith('image/'),
+      );
+      if (files.length === 0) return 0;
+      let added = 0;
+      setRefFiles((prev) => {
+        const room = 6 - prev.length;
+        if (room <= 0) {
+          showError(t('参考图最多 6 张'));
+          return prev;
+        }
+        const slice = files.slice(0, room);
+        added = slice.length;
+        if (files.length > room) {
+          showError(t('参考图最多 6 张，已截断'));
+        }
+        return [...prev, ...slice];
+      });
+      if (added > 0) {
+        setMode((m) => (m === 'i2i' ? m : 'i2i'));
+        if (!opts.silent) {
+          showSuccess(t('已添加 {{n}} 张参考图', { n: added }));
+        }
+      }
+      return added;
+    },
+    [t],
+  );
+
   const onPickFiles = (e) => {
-    const files = Array.from(e.target.files || []).filter((f) =>
-      f.type.startsWith('image/'),
-    );
-    if (files.length === 0) return;
-    setRefFiles((prev) => [...prev, ...files].slice(0, 6));
+    appendRefFiles(e.target.files, { silent: true });
     e.target.value = '';
   };
   const removeRef = (idx) =>
     setRefFiles((prev) => prev.filter((_, i) => i !== idx));
+
+  // 全局粘贴：剪贴板含图片时加入参考图
+  useEffect(() => {
+    const onPaste = (e) => {
+      const target = e.target;
+      const tag = target?.tagName;
+      const isEditable =
+        target?.isContentEditable ||
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT';
+      const items = e.clipboardData?.items || [];
+      const imgs = [];
+      for (const it of items) {
+        if (it.kind === 'file' && it.type.startsWith('image/')) {
+          const f = it.getAsFile();
+          if (f) imgs.push(f);
+        }
+      }
+      if (imgs.length === 0) return;
+      // 即便焦点在输入框，只要剪贴板里有图片就拦截
+      e.preventDefault();
+      if (isEditable && tag !== 'TEXTAREA' && tag !== 'INPUT') {
+        // contentEditable 区域不打断
+        return;
+      }
+      appendRefFiles(imgs);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [appendRefFiles]);
+
+  // 页面级拖拽：仅当数据是文件时高亮
+  const onDragEnter = (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    setIsDragOver(true);
+  };
+  const onDragOver = (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragOver(false);
+    }
+  };
+  const onDrop = (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDragOver(false);
+    const files = e.dataTransfer.files || [];
+    appendRefFiles(files);
+  };
 
   const LS_LAST_GROUP = 'image_studio.last_group';
   const LS_LAST_MODEL = 'image_studio.last_model';
@@ -548,8 +639,46 @@ const ImageStudio = () => {
     clearAllHistory(userState?.user?.id);
   };
 
+  // 逐张下载（无依赖批量导出）
+  const downloadAll = async () => {
+    if (results.length === 0 || downloadingAll) return;
+    setDownloadingAll(true);
+    try {
+      for (let i = 0; i < results.length; i++) {
+        await downloadOne(results[i]);
+        // 间隔触发，避免被浏览器合并/拦截
+        await new Promise((r) => setTimeout(r, 350));
+      }
+      showSuccess(t('已触发 {{n}} 张下载', { n: results.length }));
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   return (
-    <div className='mt-[60px] px-3 sm:px-6 pb-10 max-w-[1600px] mx-auto'>
+    <div
+      className='mt-[60px] px-3 sm:px-6 pb-10 max-w-[1600px] mx-auto relative'
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {isDragOver && (
+        <div className='fixed inset-0 z-[999] pointer-events-none flex items-center justify-center'>
+          <div className='absolute inset-4 rounded-3xl border-4 border-dashed border-purple-400 bg-purple-500/10 backdrop-blur-sm' />
+          <div className='relative px-6 py-4 rounded-2xl bg-white/90 dark:bg-slate-800/90 shadow-2xl border border-purple-300 flex items-center gap-3'>
+            <span className='inline-flex w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-pink-500 text-white items-center justify-center'>
+              <IconImage size='large' />
+            </span>
+            <div className='leading-tight'>
+              <div className='font-semibold'>{t('松开以添加为参考图')}</div>
+              <div className='text-xs text-semi-color-text-2'>
+                {t('支持多图，最多 6 张')}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Hero / 标题 */}
       <div className='flex items-end justify-between flex-wrap gap-3 mb-5'>
         <div>
@@ -592,14 +721,26 @@ const ImageStudio = () => {
             )}
           </div>
           {results.length > 0 && (
-            <Button
-              type='tertiary'
-              icon={<IconClose />}
-              onClick={clearAll}
-              size='small'
-            >
-              {t('清空结果')}
-            </Button>
+            <>
+              <Button
+                type='primary'
+                theme='solid'
+                icon={<IconDownload />}
+                onClick={downloadAll}
+                size='small'
+                loading={downloadingAll}
+              >
+                {t('下载全部')} ({results.length})
+              </Button>
+              <Button
+                type='tertiary'
+                icon={<IconClose />}
+                onClick={clearAll}
+                size='small'
+              >
+                {t('清空结果')}
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -776,6 +917,9 @@ const ImageStudio = () => {
                 </div>
                 <Text type='tertiary' size='small' className='block mt-2'>
                   {t('支持上传 1–6 张图，作为生成的视觉参考')}
+                </Text>
+                <Text type='tertiary' size='small' className='block mt-1'>
+                  {t('💡 也可直接 Ctrl/⌘+V 粘贴 或 拖拽图片到页面')}
                 </Text>
               </div>
             )}
