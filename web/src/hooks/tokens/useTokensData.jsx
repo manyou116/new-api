@@ -26,6 +26,7 @@ import {
   showError,
   showSuccess,
   encodeToBase64,
+  getSystemName,
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
@@ -232,8 +233,15 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
       serverAddress = window.location.origin;
     }
     if (url.includes('{cherryConfig}') === true) {
+      const systemName = getSystemName();
+      const providerId = (systemName || 'new-api')
+        .toString()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'new-api';
       let cherryConfig = {
-        id: 'new-api',
+        id: providerId,
+        name: systemName || 'New API',
         baseUrl: serverAddress,
         apiKey: `sk-${fullKey}`,
       };
@@ -242,8 +250,15 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
       );
       url = url.replaceAll('{cherryConfig}', encodedConfig);
     } else if (url.includes('{aionuiConfig}') === true) {
+      const systemName = getSystemName();
+      const platformId = (systemName || 'new-api')
+        .toString()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'new-api';
       let aionuiConfig = {
-        platform: 'new-api',
+        platform: platformId,
+        name: systemName || 'New API',
         baseUrl: serverAddress,
         apiKey: `sk-${fullKey}`,
       };
