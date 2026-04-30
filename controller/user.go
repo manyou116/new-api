@@ -339,6 +339,37 @@ func GetAdminUserRankings(c *gin.Context) {
 	common.ApiSuccess(c, rankings)
 }
 
+func GetAdminTodayStats(c *gin.Context) {
+	stats, err := model.GetAdminTodayStats()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, stats)
+}
+
+func GetAdminUserUsageRankings(c *gin.Context) {
+	period := c.DefaultQuery("period", "today")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	rankings, err := model.GetAdminUserUsageRankings(period, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rankings)
+}
+
+func GetAdminModelUsageStats(c *gin.Context) {
+	period := c.DefaultQuery("period", "today")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	items, err := model.GetAdminModelUsageStats(period, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, items)
+}
+
 func GetUserSummary(c *gin.Context) {
 	filters := buildUserSearchFilters(c)
 	summary, err := model.GetUserSummary(filters)
