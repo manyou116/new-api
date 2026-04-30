@@ -56,6 +56,7 @@ import {
   showSuccess,
 } from '../../helpers';
 import { renderQuota } from '../../helpers/render';
+import JSZip from 'jszip';
 import {
   loadHistory,
   saveItems,
@@ -551,9 +552,40 @@ const ImageStudio = () => {
     }
   };
 
+  // 纯前端拉取远程图为 Blob，多策略 fallback
+  // 1) fetch CORS — 速度最快，原文件
+  // 2) <img crossOrigin> + canvas — 上游需带 ACAO 头；会重编码为 PNG
+  const fetchRemoteAsBlob = async (url) => {
+    try {
+      const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
+      if (r.ok) return await r.blob();
+    } catch (_) {}
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error('toBlob 返回空'))),
+            'image/png',
+          );
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = () => reject(new Error('图片加载失败（可能未启用 CORS）'));
+      img.src = url;
+    });
+  };
+
   const downloadOne = async (item) => {
     const filename = `${item.model}-${item.id}.${item.ext || 'png'}`;
-    if (item.src.startsWith('data:')) {
+    if (typeof item.src === 'string' && item.src.startsWith('data:')) {
       const a = document.createElement('a');
       a.href = item.src;
       a.download = filename;
@@ -563,9 +595,7 @@ const ImageStudio = () => {
       return;
     }
     try {
-      const r = await fetch(item.src, { mode: 'cors', credentials: 'omit' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const blob = await r.blob();
+      const blob = await fetchRemoteAsBlob(item.src);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -575,12 +605,16 @@ const ImageStudio = () => {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
-      try {
-        window.open(item.src, '_blank', 'noopener,noreferrer');
-        showSuccess(t('已在新标签打开图片，请右键另存'));
-      } catch {
-        showError(t('下载失败，请尝试右键图片另存'));
-      }
+      // 兜底：a download；同源/带 CD 头时奏效，否则会打开新页让用户右键
+      const a = document.createElement('a');
+      a.href = item.src;
+      a.download = filename;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showSuccess(t('已尝试触发下载，若打开了新页请右键另存'));
     }
   };
 
@@ -639,17 +673,83 @@ const ImageStudio = () => {
     clearAllHistory(userState?.user?.id);
   };
 
-  // 逐张下载（无依赖批量导出）
+  // ZIP 打包下载
   const downloadAll = async () => {
     if (results.length === 0 || downloadingAll) return;
     setDownloadingAll(true);
     try {
+      const zip = new JSZip();
+      const folderName = `image-studio-${new Date()
+        .toISOString()
+        .replace(/[-:T]/g, '')
+        .slice(0, 14)}`;
+      const folder = zip.folder(folderName);
+      const manifestLines = [];
+      const failed = [];
+      let okCount = 0;
+
       for (let i = 0; i < results.length; i++) {
-        await downloadOne(results[i]);
-        // 间隔触发，避免被浏览器合并/拦截
-        await new Promise((r) => setTimeout(r, 350));
+        const it = results[i];
+        const ext = (it.ext || 'png').replace(/^\./, '');
+        const fname = `${String(i + 1).padStart(2, '0')}-${(it.model || 'img').replace(/[^\w.-]+/g, '_')}.${ext}`;
+        try {
+          let blob;
+          if (typeof it.src === 'string' && it.src.startsWith('data:')) {
+            const r = await fetch(it.src);
+            blob = await r.blob();
+          } else {
+            blob = await fetchRemoteAsBlob(it.src);
+          }
+          folder.file(fname, blob);
+          manifestLines.push(
+            `[${i + 1}] ${fname}\n  model: ${it.model || ''}\n  size:  ${it.size || ''}\n  prompt: ${it.prompt || ''}\n`,
+          );
+          okCount++;
+        } catch (e) {
+          failed.push({ index: i + 1, src: it.src, reason: e?.message || 'error' });
+          manifestLines.push(
+            `[${i + 1}] (FAILED: ${e?.message || 'error'})\n  url: ${it.src}\n  model: ${it.model || ''}\n  prompt: ${it.prompt || ''}\n`,
+          );
+        }
       }
-      showSuccess(t('已触发 {{n}} 张下载', { n: results.length }));
+
+      folder.file(
+        'manifest.txt',
+        `AI 画室生成结果\n生成时间: ${new Date().toLocaleString()}\n共 ${results.length} 张，成功 ${okCount} 张，失败 ${failed.length} 张\n\n${manifestLines.join('\n')}`,
+      );
+
+      if (okCount === 0) {
+        showError(
+          t('全部图片均无法下载（多为远程图片跨域），请尝试在每张图上单击右键另存'),
+        );
+        return;
+      }
+
+      const zipBlob = await zip.generateAsync({
+        type: 'blob',
+        compression: 'STORE', // 图片已压缩，再压缩反而慢
+      });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${folderName}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+      if (failed.length === 0) {
+        showSuccess(t('已打包 {{n}} 张到 ZIP', { n: okCount }));
+      } else {
+        showSuccess(
+          t('已打包 {{ok}} 张，{{fail}} 张失败（详见 manifest.txt）', {
+            ok: okCount,
+            fail: failed.length,
+          }),
+        );
+      }
+    } catch (e) {
+      showError(t('打包失败：') + (e?.message || ''));
     } finally {
       setDownloadingAll(false);
     }
@@ -730,7 +830,7 @@ const ImageStudio = () => {
                 size='small'
                 loading={downloadingAll}
               >
-                {t('下载全部')} ({results.length})
+                {t('下载全部')} ({results.length}) ZIP
               </Button>
               <Button
                 type='tertiary'
