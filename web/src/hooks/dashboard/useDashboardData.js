@@ -80,6 +80,11 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [uptimeData, setUptimeData] = useState([]);
   const [adminOverview, setAdminOverview] = useState(null);
   const [adminRankings, setAdminRankings] = useState(null);
+  const [adminTodayStats, setAdminTodayStats] = useState(null);
+  const [adminUsageRankings, setAdminUsageRankings] = useState([]);
+  const [adminModelUsage, setAdminModelUsage] = useState([]);
+  const [rankingsPeriod, setRankingsPeriod] = useState('today');
+  const [modelUsagePeriod, setModelUsagePeriod] = useState('today');
   const [uptimeLoading, setUptimeLoading] = useState(false);
   const [activeUptimeTab, setActiveUptimeTab] = useState('');
 
@@ -267,13 +272,24 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     if (!isAdminUser) {
       setAdminOverview(null);
       setAdminRankings(null);
+      setAdminTodayStats(null);
+      setAdminUsageRankings([]);
+      setAdminModelUsage([]);
       return;
     }
     try {
-      const [overviewRes, rankingsRes] = await Promise.all([
-        API.get('/api/user/dashboard/overview'),
-        API.get('/api/user/dashboard/rankings?limit=10'),
-      ]);
+      const [overviewRes, rankingsRes, todayRes, usageRankRes, modelUsageRes] =
+        await Promise.all([
+          API.get('/api/user/dashboard/overview'),
+          API.get('/api/user/dashboard/rankings?limit=10'),
+          API.get('/api/user/dashboard/today_stats'),
+          API.get(
+            `/api/user/dashboard/usage_rankings?period=${rankingsPeriod}&limit=10`,
+          ),
+          API.get(
+            `/api/user/dashboard/model_usage?period=${modelUsagePeriod}&limit=10`,
+          ),
+        ]);
       const overviewPayload = overviewRes?.data;
       if (overviewPayload?.success) {
         setAdminOverview(overviewPayload.data || null);
@@ -286,10 +302,28 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       } else if (rankingsPayload?.message) {
         showError(rankingsPayload.message);
       }
+      const todayPayload = todayRes?.data;
+      if (todayPayload?.success) {
+        setAdminTodayStats(todayPayload.data || null);
+      } else if (todayPayload?.message) {
+        showError(todayPayload.message);
+      }
+      const usageRankPayload = usageRankRes?.data;
+      if (usageRankPayload?.success) {
+        setAdminUsageRankings(usageRankPayload.data || []);
+      } else if (usageRankPayload?.message) {
+        showError(usageRankPayload.message);
+      }
+      const modelUsagePayload = modelUsageRes?.data;
+      if (modelUsagePayload?.success) {
+        setAdminModelUsage(modelUsagePayload.data || []);
+      } else if (modelUsagePayload?.message) {
+        showError(modelUsagePayload.message);
+      }
     } catch (error) {
       console.error(error);
     }
-  }, [isAdminUser]);
+  }, [isAdminUser, rankingsPeriod, modelUsagePeriod]);
 
   // ========== Effects ==========
   useEffect(() => {
@@ -347,6 +381,13 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     uptimeData,
     adminOverview,
     adminRankings,
+    adminTodayStats,
+    adminUsageRankings,
+    adminModelUsage,
+    rankingsPeriod,
+    setRankingsPeriod,
+    modelUsagePeriod,
+    setModelUsagePeriod,
     uptimeLoading,
     activeUptimeTab,
     setActiveUptimeTab,

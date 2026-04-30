@@ -18,12 +18,19 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Card, Empty, Tag, Typography } from '@douyinfe/semi-ui';
+import { Card, Empty, Tabs, TabPane, Tag, Typography } from '@douyinfe/semi-ui';
 import { renderNumber, renderQuota, timestamp2string } from '../../helpers';
 
 const { Text } = Typography;
 
-const AdminRankingsPanel = ({ rankings, loading, t }) => {
+const AdminRankingsPanel = ({
+  rankings,
+  loading,
+  t,
+  usageRankings,
+  rankingsPeriod,
+  onPeriodChange,
+}) => {
   const sections = [
     {
       key: 'by_request_count',
@@ -46,8 +53,67 @@ const AdminRankingsPanel = ({ rankings, loading, t }) => {
     },
   ];
 
+  const periodAware = Array.isArray(usageRankings);
+
   return (
-    <div className='mb-4'>
+    <div className='mb-4 space-y-4'>
+      {periodAware && (
+        <Card
+          className='!rounded-2xl'
+          title={t('用户消耗排行')}
+          loading={loading}
+          headerExtraContent={
+            <Tabs
+              type='button'
+              size='small'
+              activeKey={rankingsPeriod}
+              onChange={onPeriodChange}
+            >
+              <TabPane tab={t('今日')} itemKey='today' />
+              <TabPane tab={t('7日')} itemKey='7d' />
+              <TabPane tab={t('30日')} itemKey='30d' />
+              <TabPane tab={t('累计')} itemKey='all' />
+            </Tabs>
+          }
+        >
+          {usageRankings.length > 0 ? (
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
+              {usageRankings.map((item, index) => (
+                <div
+                  key={`usage-rank-${item.user_id}-${index}`}
+                  className='flex items-center justify-between gap-3 px-3 py-2 rounded-lg'
+                  style={{ background: 'var(--semi-color-fill-0)' }}
+                >
+                  <div className='flex items-center gap-2 min-w-0'>
+                    <Tag color='white' shape='circle'>#{index + 1}</Tag>
+                    <div className='min-w-0'>
+                      <Text strong className='block truncate'>
+                        {item.username || `user#${item.user_id}`}
+                      </Text>
+                      <Text type='tertiary' size='small' className='block truncate'>
+                        {renderNumber(item.requests || 0)} {t('次')}
+                        {item.top_model_name ? ` · ${item.top_model_name}` : ''}
+                      </Text>
+                    </div>
+                  </div>
+                  <div className='text-right flex-shrink-0'>
+                    <Text strong>{renderQuota(item.quota || 0)}</Text>
+                    <Text type='tertiary' size='small' className='block'>
+                      {renderNumber(item.tokens || 0)} tokens
+                    </Text>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t('该时间段暂无消耗数据')}
+            />
+          )}
+        </Card>
+      )}
+
       <div className='grid grid-cols-1 lg:grid-cols-3 gap-4'>
         {sections.map((section) => (
           <Card key={section.key} className='!rounded-2xl' title={section.title} loading={loading}>

@@ -30,6 +30,8 @@ import AnnouncementsPanel from './AnnouncementsPanel';
 import FaqPanel from './FaqPanel';
 import UptimePanel from './UptimePanel';
 import AdminRankingsPanel from './AdminRankingsPanel';
+import TodayStatsCards from './TodayStatsCards';
+import ModelUsageCard from './ModelUsageCard';
 import SearchModal from './modals/SearchModal';
 
 import { useDashboardData } from '../../hooks/dashboard/useDashboardData';
@@ -186,11 +188,28 @@ const Dashboard = () => {
       />
 
       {dashboardData.isAdminUser && (
-        <AdminRankingsPanel
-          rankings={dashboardData.adminRankings}
-          loading={dashboardData.loading}
-          t={dashboardData.t}
-        />
+        <>
+          <TodayStatsCards
+            stats={dashboardData.adminTodayStats}
+            loading={dashboardData.loading}
+          />
+          <ModelUsageCard
+            items={dashboardData.adminModelUsage}
+            period={dashboardData.modelUsagePeriod}
+            onPeriodChange={dashboardData.setModelUsagePeriod}
+            loading={dashboardData.loading}
+          />
+          <div className='mt-4'>
+            <AdminRankingsPanel
+              rankings={dashboardData.adminRankings}
+              usageRankings={dashboardData.adminUsageRankings}
+              rankingsPeriod={dashboardData.rankingsPeriod}
+              onPeriodChange={dashboardData.setRankingsPeriod}
+              loading={dashboardData.loading}
+              t={dashboardData.t}
+            />
+          </div>
+        </>
       )}
 
       {/* API信息和图表面板 */}

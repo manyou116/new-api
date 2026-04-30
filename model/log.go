@@ -531,3 +531,196 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 
 	return total, nil
 }
+
+// ===================== Admin Dashboard Aggregations (logs-based) =====================
+
+type AdminTodayStats struct {
+WindowStart  int64 `json:"window_start"`
+WindowEnd    int64 `json:"window_end"`
+Quota        int64 `json:"quota"`
+Tokens       int64 `json:"tokens"`
+Requests     int64 `json:"requests"`
+ActiveUsers  int64 `json:"active_users"`
+
+YesterdayQuota       int64 `json:"yesterday_quota"`
+YesterdayTokens      int64 `json:"yesterday_tokens"`
+YesterdayRequests    int64 `json:"yesterday_requests"`
+YesterdayActiveUsers int64 `json:"yesterday_active_users"`
+}
+
+type AdminUserUsageRankItem struct {
+UserId       int    `json:"user_id"`
+Username     string `json:"username"`
+Quota        int64  `json:"quota"`
+Requests     int64  `json:"requests"`
+Tokens       int64  `json:"tokens"`
+TopModelName string `json:"top_model_name"`
+}
+
+type AdminModelUsageItem struct {
+ModelName string `json:"model_name"`
+Quota     int64  `json:"quota"`
+Requests  int64  `json:"requests"`
+Tokens    int64  `json:"tokens"`
+}
+
+// periodToRange converts a period token (today / 7d / 30d / all) into [start, end]
+// unix-second timestamps. For "all" the start is 0.
+func periodToRange(period string) (int64, int64) {
+now := time.Now().Unix()
+switch period {
+case "today":
+t := time.Now()
+start := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).Unix()
+return start, now
+case "7d":
+return now - 7*86400, now
+case "30d":
+return now - 30*86400, now
+case "all":
+return 0, now
+default:
+t := time.Now()
+start := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).Unix()
+return start, now
+}
+}
+
+func aggregateLogWindow(start, end int64) (quota, tokens, requests, activeUsers int64, err error) {
+type aggRow struct {
+Quota       int64 `gorm:"column:quota"`
+Tokens      int64 `gorm:"column:tokens"`
+Requests    int64 `gorm:"column:requests"`
+ActiveUsers int64 `gorm:"column:active_users"`
+}
+var row aggRow
+tx := LOG_DB.Table("logs").
+Select("COALESCE(SUM(quota),0) AS quota, " +
+"COALESCE(SUM(prompt_tokens + completion_tokens),0) AS tokens, " +
+"COUNT(*) AS requests, " +
+"COUNT(DISTINCT user_id) AS active_users").
+Where("type = ?", LogTypeConsume).
+Where("created_at >= ? AND created_at < ?", start, end)
+if err = tx.Scan(&row).Error; err != nil {
+return
+}
+return row.Quota, row.Tokens, row.Requests, row.ActiveUsers, nil
+}
+
+// GetAdminTodayStats returns aggregates for "today" (00:00 local..now) and
+// "yesterday" (previous full local day) windows derived from the logs table.
+func GetAdminTodayStats() (*AdminTodayStats, error) {
+t := time.Now()
+todayStart := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).Unix()
+now := t.Unix()
+yesterdayStart := todayStart - 86400
+
+stats := &AdminTodayStats{
+WindowStart: todayStart,
+WindowEnd:   now,
+}
+q, tk, r, au, err := aggregateLogWindow(todayStart, now)
+if err != nil {
+return nil, err
+}
+stats.Quota, stats.Tokens, stats.Requests, stats.ActiveUsers = q, tk, r, au
+
+q, tk, r, au, err = aggregateLogWindow(yesterdayStart, todayStart)
+if err != nil {
+return nil, err
+}
+stats.YesterdayQuota, stats.YesterdayTokens, stats.YesterdayRequests, stats.YesterdayActiveUsers = q, tk, r, au
+return stats, nil
+}
+
+// GetAdminUserUsageRankings returns the top-N users (by consumed quota) within
+// the requested time window. The username is taken from the log row to avoid a
+// JOIN; an extra sub-query gives each user's most-used model in the window.
+func GetAdminUserUsageRankings(period string, limit int) ([]AdminUserUsageRankItem, error) {
+if limit <= 0 {
+limit = 10
+}
+if limit > 50 {
+limit = 50
+}
+start, end := periodToRange(period)
+
+type row struct {
+UserId   int    `gorm:"column:user_id"`
+Username string `gorm:"column:username"`
+Quota    int64  `gorm:"column:quota"`
+Requests int64  `gorm:"column:requests"`
+Tokens   int64  `gorm:"column:tokens"`
+}
+var rows []row
+tx := LOG_DB.Table("logs").
+Select("user_id, MAX(username) AS username, " +
+"COALESCE(SUM(quota),0) AS quota, " +
+"COUNT(*) AS requests, " +
+"COALESCE(SUM(prompt_tokens + completion_tokens),0) AS tokens").
+Where("type = ?", LogTypeConsume).
+Where("created_at >= ? AND created_at < ?", start, end).
+Group("user_id").
+Order("quota DESC, requests DESC").
+Limit(limit)
+if err := tx.Scan(&rows).Error; err != nil {
+return nil, err
+}
+
+result := make([]AdminUserUsageRankItem, 0, len(rows))
+for _, r := range rows {
+item := AdminUserUsageRankItem{
+UserId:   r.UserId,
+Username: r.Username,
+Quota:    r.Quota,
+Requests: r.Requests,
+Tokens:   r.Tokens,
+}
+// Per-user top model (best-effort; ignore errors).
+var topRow struct {
+ModelName string `gorm:"column:model_name"`
+}
+_ = LOG_DB.Table("logs").
+Select("model_name").
+Where("type = ?", LogTypeConsume).
+Where("user_id = ?", r.UserId).
+Where("created_at >= ? AND created_at < ?", start, end).
+Where("model_name <> ''").
+Group("model_name").
+Order("SUM(quota) DESC").
+Limit(1).
+Scan(&topRow).Error
+item.TopModelName = topRow.ModelName
+result = append(result, item)
+}
+return result, nil
+}
+
+// GetAdminModelUsageStats returns the top-N models by consumed quota in the
+// requested window.
+func GetAdminModelUsageStats(period string, limit int) ([]AdminModelUsageItem, error) {
+if limit <= 0 {
+limit = 10
+}
+if limit > 50 {
+limit = 50
+}
+start, end := periodToRange(period)
+
+var items []AdminModelUsageItem
+tx := LOG_DB.Table("logs").
+Select("model_name, " +
+"COALESCE(SUM(quota),0) AS quota, " +
+"COUNT(*) AS requests, " +
+"COALESCE(SUM(prompt_tokens + completion_tokens),0) AS tokens").
+Where("type = ?", LogTypeConsume).
+Where("created_at >= ? AND created_at < ?", start, end).
+Where("model_name <> ''").
+Group("model_name").
+Order("quota DESC").
+Limit(limit)
+if err := tx.Scan(&items).Error; err != nil {
+return nil, err
+}
+return items, nil
+}
