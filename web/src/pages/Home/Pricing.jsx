@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Spin } from '@douyinfe/semi-ui';
 import { useNavigate } from 'react-router-dom';
-import { API } from '../../helpers';
+import { API, renderQuota } from '../../helpers';
 import { theme } from './theme/design';
 
 const formatCurrency = (amount, currency = 'CNY') => {
@@ -82,7 +82,7 @@ const PricingAndTutorial = () => {
       desc: plan.subtitle || '后台已启用的真实订阅套餐。',
       period: formatDuration(plan.duration_value, plan.duration_unit),
       quota: plan.total_amount
-        ? `${plan.total_amount.toLocaleString()} 额度`
+        ? `${renderQuota(plan.total_amount)}`
         : '额度按后台配置',
       reset: plan.quota_reset_period
         ? `重置周期：${plan.quota_reset_period}`
