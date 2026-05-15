@@ -2,13 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -192,9 +196,45 @@ func main() {
 	// Log startup success message
 	common.LogStartupSuccess(startTime, port)
 
-	err = server.Run(":" + port)
-	if err != nil {
-		common.FatalLog("failed to start HTTP server: " + err.Error())
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: server,
+	}
+
+	serverErrCh := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrCh <- err
+		}
+		close(serverErrCh)
+	}()
+
+	stopCh := make(chan os.Signal, 1)
+	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErrCh:
+		if err != nil {
+			common.FatalLog("failed to start HTTP server: " + err.Error())
+		}
+	case sig := <-stopCh:
+		common.SysLog(fmt.Sprintf("received signal %s, starting graceful shutdown", sig))
+		controller.MarkShuttingDown()
+
+		// 让 LB / Swarm routing-mesh / nginx healthcheck 先观测到 /api/status 503 并摘流量
+		drain := common.GetEnvOrDefault("SHUTDOWN_DRAIN_DELAY_SECONDS", 10)
+		common.SysLog(fmt.Sprintf("draining: returning 503 from /api/status for %ds before closing listener", drain))
+		time.Sleep(time.Duration(drain) * time.Second)
+
+		timeoutSec := common.GetEnvOrDefault("SHUTDOWN_TIMEOUT_SECONDS", 600)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(ctx); err != nil {
+			common.SysError(fmt.Sprintf("graceful shutdown error: %v", err))
+		} else {
+			common.SysLog("HTTP server stopped, all in-flight requests finished")
+		}
 	}
 }
 
