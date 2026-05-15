@@ -20,6 +20,8 @@ services:
     container_name: new-api
     restart: always
     command: --log-dir /app/logs
+    stop_grace_period: 11m
+    stop_signal: SIGTERM
     ports:
       - "3000:3000"
     volumes:

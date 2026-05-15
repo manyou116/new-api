@@ -1,0 +1,115 @@
+# New-API Docker Swarm Stack — zero-downtime rolling update example
+#
+# Usage:
+#   docker stack deploy -c docker-stack.yml new-api
+#
+# Prerequisites for true zero-downtime updates:
+#   1. Swarm mode initialized:  docker swarm init
+#   2. SESSION_SECRET MUST be set to a fixed random string (otherwise users
+#      get logged out whenever they hit a different replica).
+#   3. SQL_DSN / REDIS_CONN_STRING must point to shared infra (not embedded
+#      sqlite / single-node redis).
+#   4. The app must run a binary that supports graceful shutdown (this repo
+#      since the SIGTERM handling commit). Old images WILL drop in-flight
+#      requests on update.
+#
+# How the rolling update stays zero-downtime:
+#   - update_config.order: start-first  -> new task healthy BEFORE old one stops
+#   - healthcheck hits /api/status which returns 503 once SIGTERM is received
+#   - app drains for SHUTDOWN_DRAIN_DELAY_SECONDS (default 10s) so the routing
+#     mesh observes the failing healthcheck and stops sending new traffic
+#   - then srv.Shutdown waits up to SHUTDOWN_TIMEOUT_SECONDS (default 600s)
+#     for in-flight requests / SSE streams to finish
+#   - stop_grace_period (11m) > app shutdown budget, so SIGKILL is the safety net
+
+version: "3.8"
+
+services:
+  new-api:
+    image: ghcr.io/manyou116/new-api:latest
+    command: --log-dir /app/logs
+    ports:
+      - target: 3000
+        published: 3000
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    environment:
+      - SQL_DSN=postgresql://root:CHANGE_ME@postgres:5432/new-api
+      - REDIS_CONN_STRING=redis://:CHANGE_ME@redis:6379
+      - SESSION_SECRET=CHANGE_ME_TO_A_LONG_RANDOM_STRING
+      - TZ=Asia/Shanghai
+      - ERROR_LOG_ENABLED=true
+      - BATCH_UPDATE_ENABLED=true
+      # Tune these only if you know what you're doing:
+      # - SHUTDOWN_DRAIN_DELAY_SECONDS=10
+      # - SHUTDOWN_TIMEOUT_SECONDS=600
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      replicas: 3
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 30s
+        monitor: 60s
+        failure_action: rollback
+      rollback_config:
+        order: start-first
+        parallelism: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    # stop_grace_period must be larger than the app's internal shutdown
+    # budget (drain + SHUTDOWN_TIMEOUT_SECONDS) so SIGKILL only fires as
+    # a last-resort safety net.
+    stop_grace_period: 11m
+    stop_signal: SIGTERM
+    networks:
+      - new-api-network
+
+  redis:
+    image: redis:latest
+    command: ["redis-server", "--requirepass", "CHANGE_ME"]
+    volumes:
+      - redis_data:/data
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+    networks:
+      - new-api-network
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: CHANGE_ME
+      POSTGRES_DB: new-api
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+    networks:
+      - new-api-network
+
+volumes:
+  pg_data:
+  redis_data:
+
+networks:
+  new-api-network:
+    driver: overlay

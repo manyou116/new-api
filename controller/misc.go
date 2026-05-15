@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -19,6 +20,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// shuttingDown is flipped to 1 by MarkShuttingDown when the process receives
+// SIGTERM/SIGINT. While set, GetStatus returns HTTP 503 so that load balancers
+// (Docker Swarm routing mesh, nginx upstream healthchecks, etc.) observe the
+// instance as unhealthy and stop routing new traffic to it before the HTTP
+// server actually closes.
+var shuttingDown int32
+
+// MarkShuttingDown signals readiness probes (/api/status) to start failing.
+func MarkShuttingDown() {
+	atomic.StoreInt32(&shuttingDown, 1)
+}
+
+// IsShuttingDown reports whether graceful shutdown has begun.
+func IsShuttingDown() bool {
+	return atomic.LoadInt32(&shuttingDown) == 1
+}
 
 func TestStatus(c *gin.Context) {
 	err := model.PingDB()
@@ -40,6 +58,14 @@ func TestStatus(c *gin.Context) {
 }
 
 func GetStatus(c *gin.Context) {
+
+	if IsShuttingDown() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"message": "server is shutting down",
+		})
+		return
+	}
 
 	cs := console_setting.GetConsoleSetting()
 	common.OptionMapRWMutex.RLock()
