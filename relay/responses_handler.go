@@ -102,6 +102,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			}
 		}
 
+		if relaycommon.ShouldInjectImageGenerationTool(info, info.OriginModelName) {
+			if injected, modified, injErr := relaycommon.InjectImageGenerationTool(c, info, jsonData, info.OriginModelName); injErr != nil {
+				return types.NewError(injErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			} else if modified {
+				jsonData = injected
+			}
+		}
+
 		if common.DebugEnabled {
 			println("requestBody: ", string(jsonData))
 		}

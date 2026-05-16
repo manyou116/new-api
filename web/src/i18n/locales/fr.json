@@ -1,4 +1,14 @@
 {
+  "继承全局设置": "Hériter du paramètre global",
+  "留空则不启用。示例已提供，可通过下方按钮填充模板。": "Laisser vide pour désactiver. Utilisez les boutons ci-dessous pour remplir l'exemple.",
+  "强制关闭": "Forcer désactivation",
+  "强制开启": "Forcer activation",
+  "填充示例策略": "Remplir l'exemple",
+  "图像生成工具注入": "Injection de l'outil image_generation",
+  "图像生成工具注入策略": "Politique d'injection de l'outil de génération d'images",
+  "图像生成工具注入策略（JSON）": "Politique d'injection (JSON)",
+  "为该渠道独立控制是否注入 Responses 原生 image_generation 工具，优先级高于全局策略；纯图模型与黑名单模型仍会被跳过": "Remplace la politique globale pour ce canal ; les modèles image-only et listés en noir sont quand même ignorés.",
+  "为命中策略的文本模型自动注入 Responses 原生 image_generation 工具与 system 引导，使纯文本模型可在同一请求内闭环完成文生图。默认关闭，仅 OpenAI Responses 兼容渠道生效；纯图模型（gpt-image-*）会自动跳过。优先级：模型级 > 渠道级 > 全局。": "Injecte automatiquement l'outil natif image_generation des OpenAI Responses et une instruction système pour les modèles texte ciblés, permettant la génération d'images en une seule requête. Désactivé par défaut, applicable uniquement aux canaux compatibles OpenAI Responses ; les modèles uniquement images (gpt-image-*) sont ignorés. Priorité : modèle > canal > global.",
   "translation": {
     " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}": " + Appel de génération d'image {{symbol}}{{price}} / 1 fois * {{ratioType}} {{ratio}}",
     " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Recherche de fichiers {{count}} fois / 1K fois * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",

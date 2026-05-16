@@ -902,6 +902,12 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_inference_geo || false;
           data.allow_speed = parsedSettings.allow_speed || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
+          data.image_generation_injection =
+            parsedSettings.image_generation_injection === true
+              ? 'on'
+              : parsedSettings.image_generation_injection === false
+                ? 'off'
+                : 'inherit';
           data.upstream_model_update_check_enabled =
             parsedSettings.upstream_model_update_check_enabled === true;
           data.upstream_model_update_auto_sync_enabled =
@@ -932,6 +938,7 @@ const EditChannelModal = (props) => {
           data.allow_inference_geo = false;
           data.allow_speed = false;
           data.claude_beta_query = false;
+          data.image_generation_injection = 'inherit';
           data.upstream_model_update_check_enabled = false;
           data.upstream_model_update_auto_sync_enabled = false;
           data.upstream_model_update_last_check_time = 0;
@@ -950,6 +957,7 @@ const EditChannelModal = (props) => {
         data.allow_inference_geo = false;
         data.allow_speed = false;
         data.claude_beta_query = false;
+        data.image_generation_injection = 'inherit';
         data.upstream_model_update_check_enabled = false;
         data.upstream_model_update_auto_sync_enabled = false;
         data.upstream_model_update_last_check_time = 0;
@@ -2524,6 +2532,43 @@ const EditChannelModal = (props) => {
 
                   <Form.Switch field='thinking_to_content' label={t('思考内容转换')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_to_content', value)} extraText={t('将 reasoning_content 转换为 <think> 标签拼接到内容中')} />
                   <Form.Switch field='pass_through_body_enabled' label={t('透传请求体')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('pass_through_body_enabled', value)} extraText={t('启用请求体透传功能')} />
+
+                  <Form.Select
+                    field='image_generation_injection'
+                    label={t('图像生成工具注入')}
+                    placeholder={t('继承全局设置')}
+                    onChange={(value) => {
+                      const normalized =
+                        value === 'on' ? true : value === 'off' ? false : null;
+                      setInputs((prev) => ({
+                        ...prev,
+                        image_generation_injection: value,
+                      }));
+                      setChannelSettings((prev) => ({
+                        ...prev,
+                        image_generation_injection: normalized,
+                      }));
+                      let settings = {};
+                      if (inputs.settings) {
+                        try {
+                          settings = JSON.parse(inputs.settings);
+                        } catch (error) {
+                          settings = {};
+                        }
+                      }
+                      settings.image_generation_injection = normalized;
+                      handleInputChange('settings', JSON.stringify(settings));
+                    }}
+                    optionList={[
+                      { label: t('继承全局设置'), value: 'inherit' },
+                      { label: t('强制开启'), value: 'on' },
+                      { label: t('强制关闭'), value: 'off' },
+                    ]}
+                    showClear
+                    extraText={t(
+                      '为该渠道独立控制是否注入 Responses 原生 image_generation 工具，优先级高于全局策略；纯图模型与黑名单模型仍会被跳过',
+                    )}
+                  />
 
                   <Form.Input field='proxy' label={t('代理地址')} placeholder={t('例如: socks5://user:pass@host:port')} onChange={(value) => handleChannelSettingsChange('proxy', value)} showClear extraText={t('用于配置网络代理，支持 socks5 协议')} />
 

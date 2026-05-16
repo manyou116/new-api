@@ -124,6 +124,14 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
 
+	if relaycommon.ShouldInjectImageGenerationTool(info, info.OriginModelName) {
+		if injected, modified, injErr := relaycommon.InjectImageGenerationTool(c, info, jsonData, info.OriginModelName); injErr != nil {
+			return nil, types.NewError(injErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		} else if modified {
+			jsonData = injected
+		}
+	}
+
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, bytes.NewBuffer(jsonData))
 	if err != nil {
