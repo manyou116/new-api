@@ -66,10 +66,25 @@ const chatCompletionsToResponsesPolicyAllChannelsExample = JSON.stringify(
   2,
 );
 
+const imageGenerationInjectionPolicyExample = JSON.stringify(
+  {
+    enabled: true,
+    all_channels: true,
+    model_patterns: ['gpt-5.5*', 'gpt-5.4*'],
+    unsupported_models: ['gpt-image-*'],
+    default_output_format: 'png',
+    default_size: '1024x1024',
+    default_quality: 'high',
+  },
+  null,
+  2,
+);
+
 const defaultGlobalSettingInputs = {
   'global.pass_through_request_enabled': false,
   'global.thinking_model_blacklist': '[]',
   'global.chat_completions_to_responses_policy': '{}',
+  'global.image_generation_injection_policy': '{}',
   'general_setting.ping_interval_enabled': false,
   'general_setting.ping_interval_seconds': 60,
 };
@@ -83,6 +98,8 @@ export default function SettingGlobalModel(props) {
   const [inputsRow, setInputsRow] = useState(defaultGlobalSettingInputs);
   const chatCompletionsToResponsesPolicyKey =
     'global.chat_completions_to_responses_policy';
+  const imageGenerationInjectionPolicyKey =
+    'global.image_generation_injection_policy';
 
   const setChatCompletionsToResponsesPolicyValue = (value) => {
     setInputs((prev) => ({
@@ -94,12 +111,26 @@ export default function SettingGlobalModel(props) {
     }
   };
 
+  const setImageGenerationInjectionPolicyValue = (value) => {
+    setInputs((prev) => ({
+      ...prev,
+      [imageGenerationInjectionPolicyKey]: value,
+    }));
+    if (refForm.current) {
+      refForm.current.setValue(imageGenerationInjectionPolicyKey, value);
+    }
+  };
+
   const normalizeValueBeforeSave = (key, value) => {
     if (key === 'global.thinking_model_blacklist') {
       const text = typeof value === 'string' ? value.trim() : '';
       return text === '' ? '[]' : value;
     }
     if (key === 'global.chat_completions_to_responses_policy') {
+      const text = typeof value === 'string' ? value.trim() : '';
+      return text === '' ? '{}' : value;
+    }
+    if (key === 'global.image_generation_injection_policy') {
       const text = typeof value === 'string' ? value.trim() : '';
       return text === '' ? '{}' : value;
     }
@@ -157,6 +188,16 @@ export default function SettingGlobalModel(props) {
           }
         }
         if (key === 'global.chat_completions_to_responses_policy') {
+          try {
+            value =
+              value && String(value).trim() !== ''
+                ? JSON.stringify(JSON.parse(value), null, 2)
+                : defaultGlobalSettingInputs[key];
+          } catch (error) {
+            value = defaultGlobalSettingInputs[key];
+          }
+        }
+        if (key === 'global.image_generation_injection_policy') {
           try {
             value =
               value && String(value).trim() !== ''
@@ -343,6 +384,96 @@ export default function SettingGlobalModel(props) {
                             2,
                           );
                           setChatCompletionsToResponsesPolicyValue(formatted);
+                        } catch (error) {
+                          showError(t('不是合法的 JSON 字符串'));
+                        }
+                      }}
+                    >
+                      {t('格式化 JSON')}
+                    </Button>
+                  </div>
+                </Col>
+              </Row>
+            </Form.Section>
+
+            <Form.Section
+              text={
+                <span style={{ fontSize: 14, fontWeight: 600 }}>
+                  {t('图像生成工具注入策略')}
+                </span>
+              }
+            >
+              <Row style={{ marginTop: 10 }}>
+                <Col span={24}>
+                  <Banner
+                    type='info'
+                    description={t(
+                      '为命中策略的文本模型自动注入 Responses 原生 image_generation 工具与 system 引导，使纯文本模型可在同一请求内闭环完成文生图。默认关闭，仅 OpenAI Responses 兼容渠道生效；纯图模型（gpt-image-*）会自动跳过。优先级：模型级 > 渠道级 > 全局。',
+                    )}
+                  />
+                </Col>
+              </Row>
+              <Row>
+                <Col span={24}>
+                  <Form.TextArea
+                    label={t('图像生成工具注入策略（JSON）')}
+                    field={imageGenerationInjectionPolicyKey}
+                    placeholder={t(
+                      '留空则不启用。示例已提供，可通过下方按钮填充模板。',
+                    )}
+                    rows={10}
+                    rules={[
+                      {
+                        validator: (rule, value) => {
+                          if (!value || value.trim() === '') return true;
+                          return verifyJSON(value);
+                        },
+                        message: t('不是合法的 JSON 字符串'),
+                      },
+                    ]}
+                    onChange={(value) =>
+                      setInputs((prev) => ({
+                        ...prev,
+                        [imageGenerationInjectionPolicyKey]: value,
+                      }))
+                    }
+                  />
+                </Col>
+              </Row>
+              <Row style={{ marginTop: 10, marginBottom: 16 }}>
+                <Col span={24}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Button
+                      type='secondary'
+                      size='small'
+                      onClick={() =>
+                        setImageGenerationInjectionPolicyValue(
+                          imageGenerationInjectionPolicyExample,
+                        )
+                      }
+                    >
+                      {t('填充示例策略')}
+                    </Button>
+                    <Button
+                      type='secondary'
+                      size='small'
+                      onClick={() => {
+                        const raw = inputs[imageGenerationInjectionPolicyKey];
+                        if (!raw || String(raw).trim() === '') return;
+                        try {
+                          const formatted = JSON.stringify(
+                            JSON.parse(raw),
+                            null,
+                            2,
+                          );
+                          setImageGenerationInjectionPolicyValue(formatted);
                         } catch (error) {
                           showError(t('不是合法的 JSON 字符串'));
                         }

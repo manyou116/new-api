@@ -1,4 +1,14 @@
 {
+  "继承全局设置": "Kế thừa toàn cục",
+  "留空则不启用。示例已提供，可通过下方按钮填充模板。": "Để trống để tắt. Dùng nút bên dưới để chèn mẫu.",
+  "强制关闭": "Tắt cưỡng bức",
+  "强制开启": "Bật cưỡng bức",
+  "填充示例策略": "Chèn mẫu",
+  "图像生成工具注入": "Tiêm image_generation",
+  "图像生成工具注入策略": "Chính sách tiêm công cụ tạo ảnh",
+  "图像生成工具注入策略（JSON）": "Chính sách tiêm (JSON)",
+  "为该渠道独立控制是否注入 Responses 原生 image_generation 工具，优先级高于全局策略；纯图模型与黑名单模型仍会被跳过": "Ghi đè cấp kênh, ưu tiên hơn chính sách toàn cục; vẫn bỏ qua mô hình chỉ ảnh và danh sách đen.",
+  "为命中策略的文本模型自动注入 Responses 原生 image_generation 工具与 system 引导，使纯文本模型可在同一请求内闭环完成文生图。默认关闭，仅 OpenAI Responses 兼容渠道生效；纯图模型（gpt-image-*）会自动跳过。优先级：模型级 > 渠道级 > 全局。": "Tự động chèn công cụ image_generation gốc của OpenAI Responses và hướng dẫn hệ thống cho các mô hình văn bản khớp chính sách, cho phép tạo ảnh trong cùng một yêu cầu. Mặc định tắt, chỉ áp dụng cho kênh tương thích OpenAI Responses; mô hình chỉ ảnh (gpt-image-*) sẽ tự động bỏ qua. Ưu tiên: mô hình > kênh > toàn cục.",
   "translation": {
     " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}": " + Gọi tạo hình ảnh {{symbol}}{{price}} / 1 lần * {{ratioType}} {{ratio}}",
     " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Tìm kiếm tệp {{count}} lần / 1K lần * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",

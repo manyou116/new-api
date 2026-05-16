@@ -44,6 +44,11 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastDetectedModels []string      `json:"upstream_model_update_last_detected_models,omitempty"` // 上次检测到的可加入模型
 	UpstreamModelUpdateLastRemovedModels  []string      `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string      `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
+	// ImageGenerationInjection 渠道级覆盖，是否注入 Responses 原生 image_generation 工具。
+	// nil   - 沿用全局策略 (ImageGenerationInjectionPolicy)
+	// true  - 强制启用注入
+	// false - 强制禁用注入
+	ImageGenerationInjection *bool `json:"image_generation_injection,omitempty"`
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

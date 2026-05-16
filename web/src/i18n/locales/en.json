@@ -1,4 +1,14 @@
 {
+  "继承全局设置": "Inherit Global Setting",
+  "留空则不启用。示例已提供，可通过下方按钮填充模板。": "Leave empty to disable. Use the buttons below to fill the example template.",
+  "强制关闭": "Force Disable",
+  "强制开启": "Force Enable",
+  "填充示例策略": "Fill Example Policy",
+  "图像生成工具注入": "Image Generation Tool Injection",
+  "图像生成工具注入策略": "Image Generation Tool Injection Policy",
+  "图像生成工具注入策略（JSON）": "Image Generation Tool Injection Policy (JSON)",
+  "为该渠道独立控制是否注入 Responses 原生 image_generation 工具，优先级高于全局策略；纯图模型与黑名单模型仍会被跳过": "Channel-level override for whether to inject the Responses native image_generation tool. Takes precedence over the global policy; image-only and blacklisted models are still skipped.",
+  "为命中策略的文本模型自动注入 Responses 原生 image_generation 工具与 system 引导，使纯文本模型可在同一请求内闭环完成文生图。默认关闭，仅 OpenAI Responses 兼容渠道生效；纯图模型（gpt-image-*）会自动跳过。优先级：模型级 > 渠道级 > 全局。": "Automatically inject the OpenAI Responses native image_generation tool and a system prompt for text models matched by this policy, so plain text models can complete text-to-image in a single closed-loop request. Disabled by default and only applies to OpenAI Responses–compatible channels; image-only models (gpt-image-*) are skipped automatically. Priority: model level > channel level > global.",
   "translation": {
     " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}": " + Image generation call {{symbol}}{{price}} / 1 time * {{ratioType}} {{ratio}}",
     " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + File search {{count}} time / 1K times * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",

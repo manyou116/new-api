@@ -1,4 +1,14 @@
 {
+  "继承全局设置": "继承全局设置",
+  "留空则不启用。示例已提供，可通过下方按钮填充模板。": "留空则不启用。示例已提供，可通过下方按钮填充模板。",
+  "强制关闭": "强制关闭",
+  "强制开启": "强制开启",
+  "填充示例策略": "填充示例策略",
+  "图像生成工具注入": "图像生成工具注入",
+  "图像生成工具注入策略": "图像生成工具注入策略",
+  "图像生成工具注入策略（JSON）": "图像生成工具注入策略（JSON）",
+  "为该渠道独立控制是否注入 Responses 原生 image_generation 工具，优先级高于全局策略；纯图模型与黑名单模型仍会被跳过": "为该渠道独立控制是否注入 Responses 原生 image_generation 工具，优先级高于全局策略；纯图模型与黑名单模型仍会被跳过",
+  "为命中策略的文本模型自动注入 Responses 原生 image_generation 工具与 system 引导，使纯文本模型可在同一请求内闭环完成文生图。默认关闭，仅 OpenAI Responses 兼容渠道生效；纯图模型（gpt-image-*）会自动跳过。优先级：模型级 > 渠道级 > 全局。": "为命中策略的文本模型自动注入 Responses 原生 image_generation 工具与 system 引导，使纯文本模型可在同一请求内闭环完成文生图。默认关闭，仅 OpenAI Responses 兼容渠道生效；纯图模型（gpt-image-*）会自动跳过。优先级：模型级 > 渠道级 > 全局。",
   "translation": {
     " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}": " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}",
     " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_other": " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
