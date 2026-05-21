@@ -148,6 +148,25 @@ const PROMPT_PRESETS = [
   '可爱 3D 等距小房间，马卡龙色系，blender 风格，octane 渲染',
 ];
 
+const MAX_IMAGE_COUNT = 10;
+
+const formatElapsedTime = (totalSeconds) => {
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const restSeconds = seconds % 60;
+  const pad = (value) => value.toString().padStart(2, '0');
+  if (hours > 0) {
+    return `${hours}:${pad(minutes)}:${pad(restSeconds)}`;
+  }
+  return `${pad(minutes)}:${pad(restSeconds)}`;
+};
+
+const formatLogUseTime = (useTime) => {
+  const seconds = Math.max(0, parseInt(useTime, 10) || 0);
+  return `${seconds} s`;
+};
+
 const isImageGenModel = (m) => {
   if (!m) return false;
   const v = (m.value || m).toString().toLowerCase();
@@ -169,6 +188,11 @@ const ImageStudio = () => {
   const [n, setN] = useState(1);
 
   const [loading, setLoading] = useState(false);
+  const [generationStartedAt, setGenerationStartedAt] = useState(null);
+  const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0);
+  const [generationLogUseTime, setGenerationLogUseTime] = useState(null);
+  const [waitingForLogUseTime, setWaitingForLogUseTime] = useState(false);
+  const [generationError, setGenerationError] = useState('');
   const [results, setResults] = useState([]);
   const [lastCost, setLastCost] = useState(null); // 上次本次消耗的 quota
 
@@ -196,6 +220,23 @@ const ImageStudio = () => {
     setRefPreviews(urls);
     return () => revoked.forEach((u) => URL.revokeObjectURL(u));
   }, [refFiles]);
+
+  useEffect(() => {
+    if (!loading || !generationStartedAt) return undefined;
+    const updateElapsed = () => {
+      setGenerationElapsedSeconds(
+        Math.floor((Date.now() - generationStartedAt) / 1000),
+      );
+    };
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [loading, generationStartedAt]);
+
+  const handleImageCountChange = useCallback((value) => {
+    const next = Number(value) || 1;
+    setN(Math.min(MAX_IMAGE_COUNT, Math.max(1, next)));
+  }, []);
 
   // 统一往参考图列表追加图片：自动切到 i2i、限制 6 张、提示溢出
   const appendRefFiles = useCallback(
@@ -522,6 +563,16 @@ const ImageStudio = () => {
 
   const handleGenerate = async () => {
     if (!canGenerate) return;
+    const startedAt = Date.now();
+    const requestCount = Math.min(MAX_IMAGE_COUNT, Math.max(1, Number(n) || 1));
+    if (requestCount !== n) {
+      setN(requestCount);
+    }
+    setGenerationStartedAt(startedAt);
+    setGenerationElapsedSeconds(0);
+    setGenerationLogUseTime(null);
+    setWaitingForLogUseTime(false);
+    setGenerationError('');
     setLoading(true);
     try {
       let res;
@@ -530,7 +581,7 @@ const ImageStudio = () => {
         fd.append('group', group);
         fd.append('model', model);
         fd.append('prompt', prompt.trim());
-        fd.append('n', String(n));
+        fd.append('n', String(requestCount));
         fd.append('size', size);
         refFiles.forEach((f) => {
           // OpenAI 协议：单图用 'image'，多图用 'image[]'
@@ -545,7 +596,7 @@ const ImageStudio = () => {
           group,
           model,
           prompt: prompt.trim(),
-          n,
+          n: requestCount,
           size,
         };
         res = await API.post('/pg/images/generations', body, {
@@ -558,12 +609,16 @@ const ImageStudio = () => {
       if (Array.isArray(data?.data)) images = data.data;
       else if (Array.isArray(data?.data?.data)) images = data.data.data;
       else if (data?.success === false) {
-        showError(data.message || t('生成失败'));
+        const msg = data.message || t('生成失败');
+        setGenerationError(msg);
+        showError(msg);
         return;
       }
 
       if (images.length === 0) {
-        showError(t('未返回图片，请检查模型与配额'));
+        const msg = t('未返回图片，请检查模型与配额');
+        setGenerationError(msg);
+        showError(msg);
         return;
       }
 
@@ -594,6 +649,7 @@ const ImageStudio = () => {
       });
       const batchId = newItems[0].batchId;
       setResults((prev) => [...newItems, ...prev]);
+      setGenerationError('');
       showSuccess(t('生成成功'));
 
       // 持久化到 IndexedDB
@@ -604,7 +660,7 @@ const ImageStudio = () => {
         res?.headers?.['X-Oneapi-Request-Id'] ||
         '';
 
-      // 异步刷新用户余额；同时按 request_id 从日志拉取真实记账金额，确保与「使用日志」绝对一致
+      // 异步刷新用户余额；同时按 request_id 从日志拉取真实记账金额与 use_time，确保与「使用日志」一致
       API.get('/api/user/self')
         .then((r) => {
           if (r?.data?.success && r?.data?.data) {
@@ -614,6 +670,7 @@ const ImageStudio = () => {
         .catch(() => {});
 
       if (requestId) {
+        setWaitingForLogUseTime(true);
         const fetchRealCost = async () => {
           for (let i = 0; i < 6; i++) {
             await new Promise((rs) => setTimeout(rs, i === 0 ? 800 : 1200));
@@ -630,6 +687,13 @@ const ImageStudio = () => {
               const matched = list.find(
                 (x) => x && (x.request_id === requestId || x.requestId === requestId),
               );
+              if (matched) {
+                const useTime = Number(matched.use_time ?? matched.useTime);
+                if (Number.isFinite(useTime) && useTime >= 0) {
+                  setGenerationLogUseTime(useTime);
+                }
+                setWaitingForLogUseTime(false);
+              }
               if (matched && typeof matched.quota === 'number') {
                 const real = matched.quota;
                 setLastCost(real);
@@ -643,6 +707,7 @@ const ImageStudio = () => {
               }
             } catch (e) {}
           }
+          setWaitingForLogUseTime(false);
         };
         fetchRealCost();
       }
@@ -652,9 +717,11 @@ const ImageStudio = () => {
         e?.response?.data?.message ||
         e?.message ||
         t('生成失败');
+      setGenerationError(msg);
       showError(msg);
     } finally {
       setLoading(false);
+      setGenerationStartedAt(null);
     }
   };
 
@@ -1189,10 +1256,10 @@ const ImageStudio = () => {
                     <InputNumber
                       className='!w-full mt-1'
                       min={1}
-                      max={4}
+                      max={MAX_IMAGE_COUNT}
                       step={1}
                       value={n}
-                      onChange={(v) => setN(Number(v) || 1)}
+                      onChange={handleImageCountChange}
                     />
                   </div>
                 </div>
@@ -1213,10 +1280,10 @@ const ImageStudio = () => {
                   <InputNumber
                     className='!w-full mt-1'
                     min={1}
-                    max={4}
+                    max={MAX_IMAGE_COUNT}
                     step={1}
                     value={n}
-                    onChange={(v) => setN(Number(v) || 1)}
+                    onChange={handleImageCountChange}
                   />
                 </div>
               </div>
@@ -1266,6 +1333,29 @@ const ImageStudio = () => {
               {loading ? t('生成中…') : t('生成图像')}
             </Button>
 
+            {(loading || waitingForLogUseTime || generationLogUseTime != null) && (
+              <div className='flex items-center justify-between rounded-xl px-3 py-2 bg-semi-color-bg-2 border border-semi-color-border'>
+                <Text size='small' type='secondary'>
+                  {loading ? t('当前生成耗时') : t('使用日志耗时')}
+                </Text>
+                <Text size='small' strong>
+                  {loading
+                    ? formatElapsedTime(generationElapsedSeconds)
+                    : generationLogUseTime != null
+                      ? formatLogUseTime(generationLogUseTime)
+                      : t('同步中…')}
+                </Text>
+              </div>
+            )}
+
+            {generationError && (
+              <div className='rounded-xl px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50'>
+                <Text size='small' type='danger' className='!leading-relaxed'>
+                  {generationError}
+                </Text>
+              </div>
+            )}
+
             <Text type='tertiary' size='small' className='leading-relaxed'>
               {t('计费按上游模型实际用量结算，分组倍率会影响最终扣费。')}
             </Text>
@@ -1277,7 +1367,9 @@ const ImageStudio = () => {
           {loading && results.length === 0 ? (
             <div className='flex flex-col items-center justify-center py-32 gap-4'>
               <Spin size='large' />
-              <Text type='tertiary'>{t('正在生成，请稍候…')}</Text>
+              <Text type='tertiary'>
+                {t('正在生成，请稍候…')} {formatElapsedTime(generationElapsedSeconds)}
+              </Text>
               <div className='flex gap-1.5'>
                 {[0, 1, 2].map((i) => (
                   <span
