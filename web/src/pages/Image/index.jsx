@@ -148,7 +148,11 @@ const PROMPT_PRESETS = [
   '可爱 3D 等距小房间，马卡龙色系，blender 风格，octane 渲染',
 ];
 
-const MAX_IMAGE_COUNT = 10;
+const MAX_IMAGE_COUNT = 100;
+const IMAGE_REQUEST_CONCURRENCY = 10;
+
+const isDownloadableResult = (item) =>
+  item && item.src && item.status !== 'pending' && item.status !== 'failed';
 
 const formatElapsedTime = (totalSeconds) => {
   const seconds = Math.max(0, Number(totalSeconds) || 0);
@@ -170,7 +174,9 @@ const formatLogUseTime = (useTime) => {
 const isImageGenModel = (m) => {
   if (!m) return false;
   const v = (m.value || m).toString().toLowerCase();
-  return v.startsWith('gpt-image') || v.startsWith('dall-e') || v.includes('image');
+  return (
+    v.startsWith('gpt-image') || v.startsWith('dall-e') || v.includes('image')
+  );
 };
 
 const ImageStudio = () => {
@@ -402,7 +408,10 @@ const ImageStudio = () => {
       if (!opts || opts.length === 0) return;
 
       const results = await Promise.all(
-        opts.map(async (g) => [g.value, await fetchImageModelsForGroup(g.value)]),
+        opts.map(async (g) => [
+          g.value,
+          await fetchImageModelsForGroup(g.value),
+        ]),
       );
       const map = {};
       results.forEach(([g, list]) => {
@@ -417,9 +426,17 @@ const ImageStudio = () => {
       const groupHasImage = (g) => Array.isArray(map[g]) && map[g].length > 0;
 
       let chosenGroup = '';
-      if (lastGroup && opts.some((o) => o.value === lastGroup) && groupHasImage(lastGroup)) {
+      if (
+        lastGroup &&
+        opts.some((o) => o.value === lastGroup) &&
+        groupHasImage(lastGroup)
+      ) {
         chosenGroup = lastGroup;
-      } else if (userGroup && opts.some((o) => o.value === userGroup) && groupHasImage(userGroup)) {
+      } else if (
+        userGroup &&
+        opts.some((o) => o.value === userGroup) &&
+        groupHasImage(userGroup)
+      ) {
         chosenGroup = userGroup;
       } else {
         const firstWithImage = opts.find((o) => groupHasImage(o.value));
@@ -472,7 +489,10 @@ const ImageStudio = () => {
         if (Array.isArray(list) && list.length > 0) {
           setResults((prev) => {
             const existIds = new Set(prev.map((x) => x.id));
-            const merged = [...prev, ...list.filter((x) => !existIds.has(x.id))];
+            const merged = [
+              ...prev,
+              ...list.filter((x) => !existIds.has(x.id)),
+            ];
             return merged;
           });
         }
@@ -559,7 +579,21 @@ const ImageStudio = () => {
       );
     }
     return null;
-  }, [pricingMap, groupRatioMap, model, group, size, n, sizePrices, currentTier]);
+  }, [
+    pricingMap,
+    groupRatioMap,
+    model,
+    group,
+    size,
+    n,
+    sizePrices,
+    currentTier,
+  ]);
+
+  const downloadableResults = useMemo(
+    () => results.filter(isDownloadableResult),
+    [results],
+  );
 
   const handleGenerate = async () => {
     if (!canGenerate) return;
@@ -568,99 +602,226 @@ const ImageStudio = () => {
     if (requestCount !== n) {
       setN(requestCount);
     }
+    const trimmedPrompt = prompt.trim();
+    const parentBatchId = `b-${startedAt}`;
+    const placeholders = Array.from({ length: requestCount }, (_, index) => ({
+      id: `${parentBatchId}-${index + 1}`,
+      status: 'pending',
+      index: index + 1,
+      src: '',
+      ext: 'png',
+      model,
+      prompt: trimmedPrompt,
+      size,
+      mode,
+      ts: startedAt,
+      parentBatchId,
+      batchId: `${parentBatchId}-${index + 1}`,
+      batchSize: 1,
+      cost: null,
+      error: '',
+    }));
+
     setGenerationStartedAt(startedAt);
     setGenerationElapsedSeconds(0);
     setGenerationLogUseTime(null);
     setWaitingForLogUseTime(false);
     setGenerationError('');
+    setLastCost(null);
+    setResults((prev) => [...placeholders, ...prev]);
     setLoading(true);
-    try {
-      let res;
+
+    let successCount = 0;
+    let failedCount = 0;
+    let batchCostTotal = 0;
+    let logUseTimeTotal = 0;
+    let hasLogUseTime = false;
+    let logSyncStarted = false;
+    const usagePromises = [];
+
+    const extractImages = (data) => {
+      if (Array.isArray(data?.data)) return data.data;
+      if (Array.isArray(data?.data?.data)) return data.data.data;
+      return [];
+    };
+
+    const buildSingleImagePayload = async () => {
       if (mode === 'i2i') {
         const fd = new FormData();
         fd.append('group', group);
         fd.append('model', model);
-        fd.append('prompt', prompt.trim());
-        fd.append('n', String(requestCount));
+        fd.append('prompt', trimmedPrompt);
+        fd.append('n', '1');
         fd.append('size', size);
-        refFiles.forEach((f) => {
-          // OpenAI 协议：单图用 'image'，多图用 'image[]'
-          fd.append(refFiles.length > 1 ? 'image[]' : 'image', f, f.name);
+        refFiles.forEach((file) => {
+          fd.append(refFiles.length > 1 ? 'image[]' : 'image', file, file.name);
         });
-        res = await API.post('/pg/images/edits', fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 5 * 60 * 1000,
-        });
-      } else {
-        const body = {
+        return {
+          url: '/pg/images/edits',
+          body: fd,
+          config: {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 5 * 60 * 1000,
+          },
+        };
+      }
+      return {
+        url: '/pg/images/generations',
+        body: {
           group,
           model,
-          prompt: prompt.trim(),
-          n: requestCount,
+          prompt: trimmedPrompt,
+          n: 1,
           size,
-        };
-        res = await API.post('/pg/images/generations', body, {
-          timeout: 5 * 60 * 1000,
-        });
-      }
-      const data = res.data;
+        },
+        config: { timeout: 5 * 60 * 1000 },
+      };
+    };
 
-      let images = [];
-      if (Array.isArray(data?.data)) images = data.data;
-      else if (Array.isArray(data?.data?.data)) images = data.data.data;
-      else if (data?.success === false) {
-        const msg = data.message || t('生成失败');
-        setGenerationError(msg);
-        showError(msg);
-        return;
-      }
+    const fetchUsageLog = async (requestId, resultId, itemBatchId) => {
+      if (!requestId) return;
+      setWaitingForLogUseTime(true);
+      for (let retryIndex = 0; retryIndex < 6; retryIndex++) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, retryIndex === 0 ? 800 : 1200),
+        );
+        try {
+          const logResponse = await API.get('/api/log/self', {
+            params: { p: 1, page_size: 10, request_id: requestId },
+          });
+          const items =
+            logResponse?.data?.data?.items ||
+            logResponse?.data?.data?.records ||
+            logResponse?.data?.data ||
+            [];
+          const list = Array.isArray(items) ? items : [];
+          const matched = list.find(
+            (item) =>
+              item &&
+              (item.request_id === requestId || item.requestId === requestId),
+          );
+          if (!matched) continue;
 
-      if (images.length === 0) {
-        const msg = t('未返回图片，请检查模型与配额');
-        setGenerationError(msg);
-        showError(msg);
-        return;
-      }
+          const useTime = Number(matched.use_time ?? matched.useTime);
+          if (Number.isFinite(useTime) && useTime >= 0) {
+            hasLogUseTime = true;
+            logUseTimeTotal += useTime;
+            setGenerationLogUseTime(logUseTimeTotal);
+          }
 
-      const ts = Date.now();
-      const newItems = images.map((it, idx) => {
+          if (typeof matched.quota === 'number') {
+            const realCost = matched.quota;
+            batchCostTotal += realCost;
+            setLastCost(batchCostTotal);
+            setResults((prev) =>
+              prev.map((item) =>
+                item.id === resultId ? { ...item, cost: realCost } : item,
+              ),
+            );
+            updateHistoryCost(userState?.user?.id, itemBatchId, realCost);
+          }
+          return;
+        } catch (e) {}
+      }
+      if (!hasLogUseTime) {
+        setGenerationLogUseTime(null);
+      }
+    };
+
+    const markFailed = (placeholder, message) => {
+      failedCount += 1;
+      setResults((prev) =>
+        prev.map((item) =>
+          item.id === placeholder.id
+            ? { ...item, status: 'failed', error: message }
+            : item,
+        ),
+      );
+    };
+
+    const generateOne = async (placeholder) => {
+      try {
+        const payload = await buildSingleImagePayload();
+        const response = await API.post(
+          payload.url,
+          payload.body,
+          payload.config,
+        );
+        const data = response.data;
+        if (data?.success === false) {
+          throw new Error(data.message || t('生成失败'));
+        }
+        const images = extractImages(data);
+        if (images.length === 0) {
+          throw new Error(t('未返回图片，请检查模型与配额'));
+        }
+
+        const image = images[0];
         let src = '';
         let ext = 'png';
-        if (it.url) {
-          src = it.url;
-          const m = it.url.match(/\.(png|jpe?g|webp|gif)(\?|$)/i);
-          if (m) ext = m[1].toLowerCase().replace('jpeg', 'jpg');
-        } else if (it.b64_json) {
-          src = `data:image/png;base64,${it.b64_json}`;
+        if (image.url) {
+          src = image.url;
+          const match = image.url.match(/\.(png|jpe?g|webp|gif)(\?|$)/i);
+          if (match) ext = match[1].toLowerCase().replace('jpeg', 'jpg');
+        } else if (image.b64_json) {
+          src = `data:image/png;base64,${image.b64_json}`;
         }
-        return {
-          id: `${ts}-${idx}`,
+        if (!src) {
+          throw new Error(t('未返回图片，请检查模型与配额'));
+        }
+
+        const requestId =
+          response?.headers?.['x-oneapi-request-id'] ||
+          response?.headers?.['X-Oneapi-Request-Id'] ||
+          '';
+        const resultItem = {
+          ...placeholder,
+          status: 'success',
           src,
           ext,
-          model,
-          prompt: prompt.trim(),
-          size,
-          mode,
-          ts,
-          batchId: `b-${ts}`,
-          batchSize: images.length,
-          cost: null, // 待 600ms 后回填
+          requestId,
+          cost: null,
+          error: '',
         };
+        successCount += 1;
+        setResults((prev) =>
+          prev.map((item) => (item.id === placeholder.id ? resultItem : item)),
+        );
+        saveItems(userState?.user?.id, [resultItem]);
+
+        if (requestId) {
+          usagePromises.push(
+            fetchUsageLog(requestId, resultItem.id, resultItem.batchId),
+          );
+        }
+      } catch (error) {
+        const message =
+          error?.response?.data?.error?.message ||
+          error?.response?.data?.message ||
+          error?.message ||
+          t('生成失败');
+        markFailed(placeholder, message);
+      }
+    };
+
+    const runQueue = async () => {
+      let nextIndex = 0;
+      const workerCount = Math.min(
+        IMAGE_REQUEST_CONCURRENCY,
+        placeholders.length,
+      );
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (nextIndex < placeholders.length) {
+          const current = placeholders[nextIndex];
+          nextIndex += 1;
+          await generateOne(current);
+        }
       });
-      const batchId = newItems[0].batchId;
-      setResults((prev) => [...newItems, ...prev]);
-      setGenerationError('');
-      showSuccess(t('生成成功'));
+      await Promise.all(workers);
+    };
 
-      // 持久化到 IndexedDB
-      saveItems(userState?.user?.id, newItems);
-
-      const requestId =
-        res?.headers?.['x-oneapi-request-id'] ||
-        res?.headers?.['X-Oneapi-Request-Id'] ||
-        '';
-
-      // 异步刷新用户余额；同时按 request_id 从日志拉取真实记账金额与 use_time，确保与「使用日志」一致
+    try {
+      await runQueue();
       API.get('/api/user/self')
         .then((r) => {
           if (r?.data?.success && r?.data?.data) {
@@ -669,47 +830,27 @@ const ImageStudio = () => {
         })
         .catch(() => {});
 
-      if (requestId) {
-        setWaitingForLogUseTime(true);
-        const fetchRealCost = async () => {
-          for (let i = 0; i < 6; i++) {
-            await new Promise((rs) => setTimeout(rs, i === 0 ? 800 : 1200));
-            try {
-              const lr = await API.get('/api/log/self', {
-                params: { p: 1, page_size: 10, request_id: requestId },
-              });
-              const items =
-                lr?.data?.data?.items ||
-                lr?.data?.data?.records ||
-                lr?.data?.data ||
-                [];
-              const list = Array.isArray(items) ? items : [];
-              const matched = list.find(
-                (x) => x && (x.request_id === requestId || x.requestId === requestId),
-              );
-              if (matched) {
-                const useTime = Number(matched.use_time ?? matched.useTime);
-                if (Number.isFinite(useTime) && useTime >= 0) {
-                  setGenerationLogUseTime(useTime);
-                }
-                setWaitingForLogUseTime(false);
-              }
-              if (matched && typeof matched.quota === 'number') {
-                const real = matched.quota;
-                setLastCost(real);
-                setResults((prev) =>
-                  prev.map((it) =>
-                    it.batchId === batchId ? { ...it, cost: real } : it,
-                  ),
-                );
-                updateHistoryCost(userState?.user?.id, batchId, real);
-                return;
-              }
-            } catch (e) {}
-          }
+      if (successCount === requestCount) {
+        setGenerationError('');
+        showSuccess(t('生成成功'));
+      } else if (successCount > 0) {
+        const message = t('批量操作完成: {{success}}个成功, {{failed}}个失败', {
+          success: successCount,
+          failed: failedCount,
+        });
+        setGenerationError(message);
+        showError(message);
+      } else {
+        const message = t('生成失败');
+        setGenerationError(message);
+        showError(message);
+      }
+
+      if (usagePromises.length > 0) {
+        logSyncStarted = true;
+        Promise.allSettled(usagePromises).finally(() => {
           setWaitingForLogUseTime(false);
-        };
-        fetchRealCost();
+        });
       }
     } catch (e) {
       const msg =
@@ -722,6 +863,9 @@ const ImageStudio = () => {
     } finally {
       setLoading(false);
       setGenerationStartedAt(null);
+      if (!logSyncStarted) {
+        setWaitingForLogUseTime(false);
+      }
     }
   };
 
@@ -757,6 +901,7 @@ const ImageStudio = () => {
   };
 
   const downloadOne = async (item) => {
+    if (!isDownloadableResult(item)) return;
     const filename = `${item.model}-${item.id}.${item.ext || 'png'}`;
     if (typeof item.src === 'string' && item.src.startsWith('data:')) {
       const a = document.createElement('a');
@@ -805,6 +950,7 @@ const ImageStudio = () => {
 
   // 把结果图作为参考图加入 i2i 上传列表
   const useAsReference = async (item) => {
+    if (!isDownloadableResult(item)) return;
     try {
       let blob;
       if (item.src.startsWith('data:')) {
@@ -817,9 +963,7 @@ const ImageStudio = () => {
           if (!r.ok) throw new Error('fetch failed');
           blob = await r.blob();
         } catch (e) {
-          showError(
-            t('该图片受跨域限制，无法直接拾取，请右键另存后手动上传'),
-          );
+          showError(t('该图片受跨域限制，无法直接拾取，请右键另存后手动上传'));
           return;
         }
       }
@@ -848,7 +992,8 @@ const ImageStudio = () => {
 
   // ZIP 打包下载
   const downloadAll = async () => {
-    if (results.length === 0 || downloadingAll) return;
+    const downloadable = results.filter(isDownloadableResult);
+    if (downloadable.length === 0 || downloadingAll) return;
     setDownloadingAll(true);
     try {
       const zip = new JSZip();
@@ -861,8 +1006,8 @@ const ImageStudio = () => {
       const failed = [];
       let okCount = 0;
 
-      for (let i = 0; i < results.length; i++) {
-        const it = results[i];
+      for (let i = 0; i < downloadable.length; i++) {
+        const it = downloadable[i];
         const ext = (it.ext || 'png').replace(/^\./, '');
         const fname = `${String(i + 1).padStart(2, '0')}-${(it.model || 'img').replace(/[^\w.-]+/g, '_')}.${ext}`;
         try {
@@ -879,7 +1024,11 @@ const ImageStudio = () => {
           );
           okCount++;
         } catch (e) {
-          failed.push({ index: i + 1, src: it.src, reason: e?.message || 'error' });
+          failed.push({
+            index: i + 1,
+            src: it.src,
+            reason: e?.message || 'error',
+          });
           manifestLines.push(
             `[${i + 1}] (FAILED: ${e?.message || 'error'})\n  url: ${it.src}\n  model: ${it.model || ''}\n  prompt: ${it.prompt || ''}\n`,
           );
@@ -888,12 +1037,14 @@ const ImageStudio = () => {
 
       folder.file(
         'manifest.txt',
-        `AI 画室生成结果\n生成时间: ${new Date().toLocaleString()}\n共 ${results.length} 张，成功 ${okCount} 张，失败 ${failed.length} 张\n\n${manifestLines.join('\n')}`,
+        `AI 画室生成结果\n生成时间: ${new Date().toLocaleString()}\n共 ${downloadable.length} 张，成功 ${okCount} 张，失败 ${failed.length} 张\n\n${manifestLines.join('\n')}`,
       );
 
       if (okCount === 0) {
         showError(
-          t('全部图片均无法下载（多为远程图片跨域），请尝试在每张图上单击右键另存'),
+          t(
+            '全部图片均无法下载（多为远程图片跨域），请尝试在每张图上单击右键另存',
+          ),
         );
         return;
       }
@@ -969,14 +1120,18 @@ const ImageStudio = () => {
           {/* 余额信息条 */}
           <div className='flex items-center gap-3 px-3 py-2 rounded-xl border border-semi-color-border bg-semi-color-bg-1 shadow-sm text-sm'>
             <div className='flex flex-col items-end leading-tight'>
-              <span className='text-[11px] text-semi-color-text-2'>{t('余额')}</span>
+              <span className='text-[11px] text-semi-color-text-2'>
+                {t('余额')}
+              </span>
               <span className='font-semibold text-emerald-600 dark:text-emerald-400'>
                 {renderQuota(userState?.user?.quota || 0, 4)}
               </span>
             </div>
             <div className='w-px h-6 bg-semi-color-border' />
             <div className='flex flex-col items-end leading-tight'>
-              <span className='text-[11px] text-semi-color-text-2'>{t('累计已用')}</span>
+              <span className='text-[11px] text-semi-color-text-2'>
+                {t('累计已用')}
+              </span>
               <span className='font-medium'>
                 {renderQuota(userState?.user?.used_quota || 0, 2)}
               </span>
@@ -985,7 +1140,9 @@ const ImageStudio = () => {
               <>
                 <div className='w-px h-6 bg-semi-color-border' />
                 <div className='flex flex-col items-end leading-tight'>
-                  <span className='text-[11px] text-semi-color-text-2'>{t('上次消耗')}</span>
+                  <span className='text-[11px] text-semi-color-text-2'>
+                    {t('上次消耗')}
+                  </span>
                   <span className='font-medium text-rose-500'>
                     -{renderQuota(lastCost, 4)}
                   </span>
@@ -995,16 +1152,18 @@ const ImageStudio = () => {
           </div>
           {results.length > 0 && (
             <>
-              <Button
-                type='primary'
-                theme='solid'
-                icon={<IconDownload />}
-                onClick={downloadAll}
-                size='small'
-                loading={downloadingAll}
-              >
-                {t('下载全部')} ({results.length}) ZIP
-              </Button>
+              {downloadableResults.length > 0 && (
+                <Button
+                  type='primary'
+                  theme='solid'
+                  icon={<IconDownload />}
+                  onClick={downloadAll}
+                  size='small'
+                  loading={downloadingAll}
+                >
+                  {t('下载全部')} ({downloadableResults.length}) ZIP
+                </Button>
+              )}
               <Button
                 type='tertiary'
                 icon={<IconClose />}
@@ -1036,7 +1195,9 @@ const ImageStudio = () => {
             {/* 模型 + 分组 紧凑一组 */}
             <div className='grid grid-cols-2 gap-3'>
               <div>
-                <Text size='small' type='tertiary'>{t('分组')}</Text>
+                <Text size='small' type='tertiary'>
+                  {t('分组')}
+                </Text>
                 <Select
                   className='!w-full mt-1'
                   value={group}
@@ -1049,7 +1210,9 @@ const ImageStudio = () => {
                 />
               </div>
               <div>
-                <Text size='small' type='tertiary'>{t('模型')}</Text>
+                <Text size='small' type='tertiary'>
+                  {t('模型')}
+                </Text>
                 <Select
                   className='!w-full mt-1'
                   value={model}
@@ -1065,44 +1228,51 @@ const ImageStudio = () => {
               </div>
             </div>
 
-            {groupHasNoImageModel && (() => {
-              const candidates = Object.entries(imageModelsByGroup)
-                .filter(([, list]) => Array.isArray(list) && list.length > 0)
-                .map(([g]) => g);
-              return (
-                <div className='rounded-xl px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200/60 dark:border-amber-800/40'>
-                  <Text size='small' type='warning'>
-                    {t('当前分组「{{g}}」没有可用的图像生成模型。', { g: group })}
-                  </Text>
-                  {candidates.length > 0 ? (
-                    <div className='mt-1 flex flex-wrap items-center gap-2'>
-                      <Text size='small' type='tertiary'>{t('可切换到：')}</Text>
-                      {candidates.map((g) => (
-                        <Button
-                          key={g}
-                          size='small'
-                          theme='light'
-                          type='warning'
-                          onClick={() => setGroup(g)}
-                        >
-                          {g}
-                        </Button>
-                      ))}
-                    </div>
-                  ) : (
-                    <Text size='small' type='tertiary' className='block mt-1'>
-                      {t('您的所有可用分组均无图像模型，请联系管理员开通。')}
+            {groupHasNoImageModel &&
+              (() => {
+                const candidates = Object.entries(imageModelsByGroup)
+                  .filter(([, list]) => Array.isArray(list) && list.length > 0)
+                  .map(([g]) => g);
+                return (
+                  <div className='rounded-xl px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200/60 dark:border-amber-800/40'>
+                    <Text size='small' type='warning'>
+                      {t('当前分组「{{g}}」没有可用的图像生成模型。', {
+                        g: group,
+                      })}
                     </Text>
-                  )}
-                </div>
-              );
-            })()}
+                    {candidates.length > 0 ? (
+                      <div className='mt-1 flex flex-wrap items-center gap-2'>
+                        <Text size='small' type='tertiary'>
+                          {t('可切换到：')}
+                        </Text>
+                        {candidates.map((g) => (
+                          <Button
+                            key={g}
+                            size='small'
+                            theme='light'
+                            type='warning'
+                            onClick={() => setGroup(g)}
+                          >
+                            {g}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : (
+                      <Text size='small' type='tertiary' className='block mt-1'>
+                        {t('您的所有可用分组均无图像模型，请联系管理员开通。')}
+                      </Text>
+                    )}
+                  </div>
+                );
+              })()}
 
             {/* Prompt - 主角 */}
             <div>
               <div className='flex items-center justify-between mb-1'>
                 <Text strong>{t('提示词')}</Text>
-                <Text size='small' type='tertiary'>{prompt.length}/4000</Text>
+                <Text size='small' type='tertiary'>
+                  {prompt.length}/4000
+                </Text>
               </div>
               <TextArea
                 value={prompt}
@@ -1201,11 +1371,14 @@ const ImageStudio = () => {
             {sizePrices ? (
               <>
                 <div>
-                  <Text size='small' type='tertiary'>{t('分辨率')}</Text>
+                  <Text size='small' type='tertiary'>
+                    {t('分辨率')}
+                  </Text>
                   <div className='flex gap-2 mt-1 flex-wrap'>
                     {TIER_KEYS.map((tier) => {
                       const enabled =
-                        typeof sizePrices[tier] === 'number' && sizePrices[tier] > 0;
+                        typeof sizePrices[tier] === 'number' &&
+                        sizePrices[tier] > 0;
                       const active = currentTier === tier;
                       return (
                         <button
@@ -1223,11 +1396,13 @@ const ImageStudio = () => {
                           ].join(' ')}
                         >
                           <span className='font-semibold'>{tier}</span>
-                          {enabled && tierEstimates && tierEstimates[tier] != null && (
-                            <span className='text-[10px] opacity-80 mt-0.5'>
-                              ≈ {renderQuota(tierEstimates[tier], 4)}
-                            </span>
-                          )}
+                          {enabled &&
+                            tierEstimates &&
+                            tierEstimates[tier] != null && (
+                              <span className='text-[10px] opacity-80 mt-0.5'>
+                                ≈ {renderQuota(tierEstimates[tier], 4)}
+                              </span>
+                            )}
                           {!enabled && (
                             <span className='text-[10px] opacity-60 mt-0.5'>
                               {t('未配置')}
@@ -1240,7 +1415,9 @@ const ImageStudio = () => {
                 </div>
                 <div className='grid grid-cols-2 gap-3'>
                   <div>
-                    <Text size='small' type='tertiary'>{t('比例')}</Text>
+                    <Text size='small' type='tertiary'>
+                      {t('比例')}
+                    </Text>
                     <Select
                       className='!w-full mt-1'
                       value={currentAspect}
@@ -1252,7 +1429,9 @@ const ImageStudio = () => {
                     />
                   </div>
                   <div>
-                    <Text size='small' type='tertiary'>{t('数量')}</Text>
+                    <Text size='small' type='tertiary'>
+                      {t('数量')}
+                    </Text>
                     <InputNumber
                       className='!w-full mt-1'
                       min={1}
@@ -1267,7 +1446,9 @@ const ImageStudio = () => {
             ) : (
               <div className='grid grid-cols-2 gap-3'>
                 <div>
-                  <Text size='small' type='tertiary'>{t('比例')}</Text>
+                  <Text size='small' type='tertiary'>
+                    {t('比例')}
+                  </Text>
                   <Select
                     className='!w-full mt-1'
                     value={size}
@@ -1276,7 +1457,9 @@ const ImageStudio = () => {
                   />
                 </div>
                 <div>
-                  <Text size='small' type='tertiary'>{t('数量')}</Text>
+                  <Text size='small' type='tertiary'>
+                    {t('数量')}
+                  </Text>
                   <InputNumber
                     className='!w-full mt-1'
                     min={1}
@@ -1311,7 +1494,12 @@ const ImageStudio = () => {
                     : t('暂无该模型价格信息，将按上游实际用量结算')
                 }
               >
-                <Text strong style={{ color: estimatedQuota != null ? '#e11d48' : undefined }}>
+                <Text
+                  strong
+                  style={{
+                    color: estimatedQuota != null ? '#e11d48' : undefined,
+                  }}
+                >
                   {estimatedQuota != null
                     ? `≈ ${renderQuota(estimatedQuota, 4)}`
                     : t('未知')}
@@ -1333,7 +1521,9 @@ const ImageStudio = () => {
               {loading ? t('生成中…') : t('生成图像')}
             </Button>
 
-            {(loading || waitingForLogUseTime || generationLogUseTime != null) && (
+            {(loading ||
+              waitingForLogUseTime ||
+              generationLogUseTime != null) && (
               <div className='flex items-center justify-between rounded-xl px-3 py-2 bg-semi-color-bg-2 border border-semi-color-border'>
                 <Text size='small' type='secondary'>
                   {loading ? t('当前生成耗时') : t('使用日志耗时')}
@@ -1364,23 +1554,7 @@ const ImageStudio = () => {
 
         {/* 画廊 */}
         <div className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 shadow-sm min-h-[60vh] p-4'>
-          {loading && results.length === 0 ? (
-            <div className='flex flex-col items-center justify-center py-32 gap-4'>
-              <Spin size='large' />
-              <Text type='tertiary'>
-                {t('正在生成，请稍候…')} {formatElapsedTime(generationElapsedSeconds)}
-              </Text>
-              <div className='flex gap-1.5'>
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className='w-2 h-2 rounded-full bg-gradient-to-r from-indigo-500 to-pink-500 animate-pulse'
-                    style={{ animationDelay: `${i * 0.15}s` }}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : results.length === 0 ? (
+          {results.length === 0 ? (
             <div className='flex items-center justify-center py-24'>
               <Empty
                 image={
@@ -1389,7 +1563,9 @@ const ImageStudio = () => {
                   </div>
                 }
                 title={
-                  <span className='text-base font-medium'>{t('开启你的创作')}</span>
+                  <span className='text-base font-medium'>
+                    {t('开启你的创作')}
+                  </span>
                 }
                 description={t('在左侧写下提示词，点击「生成图像」开始')}
               />
@@ -1402,48 +1578,94 @@ const ImageStudio = () => {
                   className='group relative rounded-xl overflow-hidden bg-semi-color-bg-2 border border-semi-color-border hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200'
                 >
                   <div className='relative aspect-square bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900'>
-                    <Image
-                      src={it.src}
-                      width='100%'
-                      height='100%'
-                      style={{ objectFit: 'cover' }}
-                      preview
-                    />
-                    {/* hover 工具条 */}
-                    <div className='absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
-                      <Tooltip content={t('用作参考图（图生图）')}>
+                    {it.status === 'pending' ? (
+                      <div className='absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center'>
+                        <Spin size='large' />
+                        <div>
+                          <Text strong>{t('生成中…')}</Text>
+                          <Text
+                            type='tertiary'
+                            size='small'
+                            className='block mt-1'
+                          >
+                            {t('第 {{n}} 张', { n: it.index || 1 })} ·{' '}
+                            {formatElapsedTime(generationElapsedSeconds)}
+                          </Text>
+                        </div>
+                      </div>
+                    ) : it.status === 'failed' ? (
+                      <div className='absolute inset-0 flex flex-col items-center justify-center gap-3 px-5 text-center bg-red-50 dark:bg-red-900/20'>
+                        <span className='inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/40 text-red-500'>
+                          <IconClose size='large' />
+                        </span>
+                        <div>
+                          <Text strong type='danger'>
+                            {t('生成失败')}
+                          </Text>
+                          <Text
+                            type='tertiary'
+                            size='small'
+                            ellipsis={{ showTooltip: true, rows: 3 }}
+                            className='block mt-1'
+                          >
+                            {it.error || t('生成失败')}
+                          </Text>
+                        </div>
                         <Button
                           size='small'
-                          icon={<IconImage />}
-                          onClick={() => useAsReference(it)}
-                          className='!backdrop-blur !bg-white/70 dark:!bg-black/50'
-                        />
-                      </Tooltip>
-                      <Tooltip content={t('复用提示词')}>
-                        <Button
-                          size='small'
-                          icon={<IconCopy />}
-                          onClick={() => reusePrompt(it)}
-                          className='!backdrop-blur !bg-white/70 dark:!bg-black/50'
-                        />
-                      </Tooltip>
-                      <Tooltip content={t('下载')}>
-                        <Button
-                          size='small'
-                          icon={<IconDownload />}
-                          onClick={() => downloadOne(it)}
-                          className='!backdrop-blur !bg-white/70 dark:!bg-black/50'
-                        />
-                      </Tooltip>
-                      <Tooltip content={t('移除')}>
-                        <Button
-                          size='small'
+                          type='tertiary'
                           icon={<IconClose />}
                           onClick={() => removeOne(it.id)}
-                          className='!backdrop-blur !bg-white/70 dark:!bg-black/50'
+                        >
+                          {t('移除')}
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <Image
+                          src={it.src}
+                          width='100%'
+                          height='100%'
+                          style={{ objectFit: 'cover' }}
+                          preview
                         />
-                      </Tooltip>
-                    </div>
+                        {/* hover 工具条 */}
+                        <div className='absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
+                          <Tooltip content={t('用作参考图（图生图）')}>
+                            <Button
+                              size='small'
+                              icon={<IconImage />}
+                              onClick={() => useAsReference(it)}
+                              className='!backdrop-blur !bg-white/70 dark:!bg-black/50'
+                            />
+                          </Tooltip>
+                          <Tooltip content={t('复用提示词')}>
+                            <Button
+                              size='small'
+                              icon={<IconCopy />}
+                              onClick={() => reusePrompt(it)}
+                              className='!backdrop-blur !bg-white/70 dark:!bg-black/50'
+                            />
+                          </Tooltip>
+                          <Tooltip content={t('下载')}>
+                            <Button
+                              size='small'
+                              icon={<IconDownload />}
+                              onClick={() => downloadOne(it)}
+                              className='!backdrop-blur !bg-white/70 dark:!bg-black/50'
+                            />
+                          </Tooltip>
+                          <Tooltip content={t('移除')}>
+                            <Button
+                              size='small'
+                              icon={<IconClose />}
+                              onClick={() => removeOne(it.id)}
+                              className='!backdrop-blur !bg-white/70 dark:!bg-black/50'
+                            />
+                          </Tooltip>
+                        </div>
+                      </>
+                    )}
                   </div>
                   <div className='p-3'>
                     <Text
@@ -1453,12 +1675,26 @@ const ImageStudio = () => {
                       {it.prompt}
                     </Text>
                     <div className='flex items-center gap-1 mt-2 flex-wrap'>
-                      <Tag size='small' color='blue' type='light'>{it.model}</Tag>
-                      <Tag size='small' color='grey' type='light'>{it.size}</Tag>
+                      <Tag size='small' color='blue' type='light'>
+                        {it.model}
+                      </Tag>
+                      <Tag size='small' color='grey' type='light'>
+                        {it.size}
+                      </Tag>
                       {it.mode === 'i2i' && (
-                        <Tag size='small' color='purple' type='light'>i2i</Tag>
+                        <Tag size='small' color='purple' type='light'>
+                          i2i
+                        </Tag>
                       )}
-                      {it.cost != null ? (
+                      {it.status === 'pending' ? (
+                        <Tag size='small' color='blue' type='ghost'>
+                          {t('生成中…')}
+                        </Tag>
+                      ) : it.status === 'failed' ? (
+                        <Tag size='small' color='red' type='light'>
+                          {t('生成失败')}
+                        </Tag>
+                      ) : it.cost != null ? (
                         <Tooltip
                           content={
                             it.batchSize > 1
@@ -1473,7 +1709,9 @@ const ImageStudio = () => {
                         >
                           <Tag size='small' color='red' type='light'>
                             {renderQuota(
-                              it.batchSize > 1 ? it.cost / it.batchSize : it.cost,
+                              it.batchSize > 1
+                                ? it.cost / it.batchSize
+                                : it.cost,
                               4,
                             )}
                           </Tag>

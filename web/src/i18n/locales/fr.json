@@ -188,6 +188,7 @@
     "倍率是为了方便换算不同价格的模型": "Le ratio sert à faciliter la conversion de modèles à des prix différents.",
     "倍率信息": "Informations sur le ratio",
     "倍率用于计费乘数，勾选「用户可选」后用户可在创建令牌时选择该分组": "Ratio is the billing multiplier. Check \"User Selectable\" to let users pick this group when creating tokens",
+    "第 {{n}} 张": "Image {{n}}",
     "本次共 {{n}} 张，合计 {{c}}": "{{n}} images cette fois, total {{c}}",
     "本次消耗 {{c}}": "Coût de cette exécution {{c}}",
     "本地": "Local",
