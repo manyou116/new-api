@@ -3988,6 +3988,9 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URLは、http://またはhttps://で始まることが必須です",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "whsec_xxx のWebhook署名シークレット。機密情報は表示されません",
     "Worker地址": "Workerアドレス",
+    "已等待": "待機時間",
+    "当前已等待时间": "現在の待機時間",
+    "生成耗时": "生成時間",
     "Worker密钥": "WorkerAPIキー"
   }
 }

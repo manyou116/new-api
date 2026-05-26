@@ -85,7 +85,8 @@ func Distribute() func(c *gin.Context) {
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 				// playground: chat completions 和 images 都允许客户端在 body 内指定分组
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") ||
-					strings.HasPrefix(c.Request.URL.Path, "/pg/images/") {
+					strings.HasPrefix(c.Request.URL.Path, "/pg/images/") ||
+					strings.HasPrefix(c.Request.URL.Path, "/pg/image-studio/") {
 					playgroundRequest := &dto.PlayGroundRequest{}
 					err = common.UnmarshalBodyReusable(c, playgroundRequest)
 					if err != nil {
@@ -294,7 +295,9 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			modelRequest.Model = c.Param("model")
 		}
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") || strings.HasPrefix(c.Request.URL.Path, "/pg/images/generations") {
+	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") ||
+		strings.HasPrefix(c.Request.URL.Path, "/pg/images/generations") ||
+		strings.HasPrefix(c.Request.URL.Path, "/pg/image-studio/generations") {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
 		// 仅在 JSON body 时尝试读取 size 字段；multipart/form-data 走下方分支。
 		if req, err := getModelFromRequest(c); err == nil && req != nil && req.Size != "" {
@@ -302,7 +305,9 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 				common.SetContextKey(c, constant.ContextKeyRequestImageSizeTier, tier)
 			}
 		}
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") || strings.HasPrefix(c.Request.URL.Path, "/pg/images/edits") {
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") ||
+		strings.HasPrefix(c.Request.URL.Path, "/pg/images/edits") ||
+		strings.HasPrefix(c.Request.URL.Path, "/pg/image-studio/edits") {
 		//modelRequest.Model = common.GetStringIfEmpty(c.PostForm("model"), "gpt-image-1")
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
@@ -347,7 +352,9 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		}
 		c.Set("relay_mode", relayMode)
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") || strings.HasPrefix(c.Request.URL.Path, "/pg/images/") {
+	if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") ||
+		strings.HasPrefix(c.Request.URL.Path, "/pg/images/") ||
+		strings.HasPrefix(c.Request.URL.Path, "/pg/image-studio/") {
 		// playground chat completions
 		req, err := getModelFromRequest(c)
 		if err != nil {

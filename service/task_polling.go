@@ -55,6 +55,9 @@ func sweepTimedOutTasks(ctx context.Context) {
 	timedOutCount := 0
 
 	for _, task := range tasks {
+		if task.Platform == constant.TaskPlatformImageStudio {
+			continue
+		}
 		isLegacy := task.SubmitTime > 0 && task.SubmitTime < legacyTaskCutoff
 
 		oldStatus := task.Status
@@ -107,6 +110,9 @@ func TaskPollingLoop() {
 			taskM := make(map[string]*model.Task)
 			nullTaskIds := make([]int64, 0)
 			for _, task := range tasks {
+				if task.Platform == constant.TaskPlatformImageStudio {
+					continue
+				}
 				upstreamID := task.GetUpstreamTaskID()
 				if upstreamID == "" {
 					// 统计失败的未完成任务
@@ -142,6 +148,8 @@ func DispatchPlatformUpdate(platform constant.TaskPlatform, taskChannelM map[int
 	switch platform {
 	case constant.TaskPlatformMidjourney:
 		// MJ 轮询由其自身处理，这里预留入口
+	case constant.TaskPlatformImageStudio:
+		// AI 画室任务由提交时启动的后台执行器处理，这里避免通用轮询误按视频任务拉取。
 	case constant.TaskPlatformSuno:
 		_ = UpdateSunoTasks(context.Background(), taskChannelM, taskM)
 	default:

@@ -4025,6 +4025,9 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URL 必须以 http:// 或 https:// 开头",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示",
     "Worker地址": "Worker地址",
+    "已等待": "已等待",
+    "当前已等待时间": "当前已等待时间",
+    "生成耗时": "生成耗时",
     "Worker密钥": "Worker密钥"
   }
 }

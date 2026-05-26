@@ -4054,6 +4054,9 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URL must start with http:// or https://",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Webhook signature key for whsec_xxx, sensitive information not displayed",
     "Worker地址": "Worker Address",
+    "已等待": "Waited",
+    "当前已等待时间": "Current waiting time",
+    "生成耗时": "Generation duration",
     "Worker密钥": "Worker Key"
   }
 }

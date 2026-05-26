@@ -47,6 +47,7 @@ import {
   IconCopy,
   IconClose,
   IconPlus,
+  IconClock,
 } from '@douyinfe/semi-icons';
 import {
   API,
@@ -57,13 +58,6 @@ import {
 } from '../../helpers';
 import { renderQuota } from '../../helpers/render';
 import JSZip from 'jszip';
-import {
-  loadHistory,
-  saveItems,
-  updateCost as updateHistoryCost,
-  deleteItem as deleteHistoryItem,
-  clearHistory as clearAllHistory,
-} from '../../helpers/imageHistory';
 import { UserContext } from '../../context/User';
 
 const { Text, Title } = Typography;
@@ -149,26 +143,21 @@ const PROMPT_PRESETS = [
 ];
 
 const MAX_IMAGE_COUNT = 100;
-const IMAGE_REQUEST_CONCURRENCY = 10;
+const IMAGE_STUDIO_PLATFORM = 'image_studio';
+const IMAGE_TASK_POLL_INTERVAL = 3000;
+const LS_HIDDEN_RESULTS = 'image_studio.hidden_results';
 
 const isDownloadableResult = (item) =>
   item && item.src && item.status !== 'pending' && item.status !== 'failed';
 
-const formatElapsedTime = (totalSeconds) => {
-  const seconds = Math.max(0, Number(totalSeconds) || 0);
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const restSeconds = seconds % 60;
-  const pad = (value) => value.toString().padStart(2, '0');
-  if (hours > 0) {
-    return `${hours}:${pad(minutes)}:${pad(restSeconds)}`;
-  }
-  return `${pad(minutes)}:${pad(restSeconds)}`;
-};
-
-const formatLogUseTime = (useTime) => {
-  const seconds = Math.max(0, parseInt(useTime, 10) || 0);
-  return `${seconds} s`;
+const formatDuration = (seconds) => {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
 };
 
 const isImageGenModel = (m) => {
@@ -194,12 +183,18 @@ const ImageStudio = () => {
   const [n, setN] = useState(1);
 
   const [loading, setLoading] = useState(false);
-  const [generationStartedAt, setGenerationStartedAt] = useState(null);
-  const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0);
-  const [generationLogUseTime, setGenerationLogUseTime] = useState(null);
-  const [waitingForLogUseTime, setWaitingForLogUseTime] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [generationError, setGenerationError] = useState('');
   const [results, setResults] = useState([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [hiddenResultIds, setHiddenResultIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(LS_HIDDEN_RESULTS) || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
   const [lastCost, setLastCost] = useState(null); // 上次本次消耗的 quota
 
   // 价格表与分组倍率（用于生成前预估费用）
@@ -226,18 +221,6 @@ const ImageStudio = () => {
     setRefPreviews(urls);
     return () => revoked.forEach((u) => URL.revokeObjectURL(u));
   }, [refFiles]);
-
-  useEffect(() => {
-    if (!loading || !generationStartedAt) return undefined;
-    const updateElapsed = () => {
-      setGenerationElapsedSeconds(
-        Math.floor((Date.now() - generationStartedAt) / 1000),
-      );
-    };
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 1000);
-    return () => window.clearInterval(timer);
-  }, [loading, generationStartedAt]);
 
   const handleImageCountChange = useCallback((value) => {
     const next = Number(value) || 1;
@@ -477,34 +460,11 @@ const ImageStudio = () => {
     if (model) localStorage.setItem(LS_LAST_MODEL, model);
   }, [model]);
 
-  // 当用户 id 就绪时从 IndexedDB 恢复历史生成记录（避免 mount 时 id 还未加载导致读到错误的桶）
-  const historyLoadedRef = useRef(false);
-  useEffect(() => {
-    const uid = userState?.user?.id;
-    if (uid == null || historyLoadedRef.current) return;
-    historyLoadedRef.current = true;
-    (async () => {
-      try {
-        const list = await loadHistory(uid);
-        if (Array.isArray(list) && list.length > 0) {
-          setResults((prev) => {
-            const existIds = new Set(prev.map((x) => x.id));
-            const merged = [
-              ...prev,
-              ...list.filter((x) => !existIds.has(x.id)),
-            ];
-            return merged;
-          });
-        }
-      } catch (e) {}
-    })();
-  }, [userState?.user?.id]);
-
   const canGenerate = useMemo(() => {
-    if (loading || !model || !prompt.trim()) return false;
+    if (submitting || !model || !prompt.trim()) return false;
     if (mode === 'i2i' && refFiles.length === 0) return false;
     return true;
-  }, [loading, model, prompt, mode, refFiles]);
+  }, [submitting, model, prompt, mode, refFiles]);
 
   // 计算 dall-e 系列的 size & quality 系数，gpt-image / 其他默认 1
   const computeSizeRatio = (m, s) => {
@@ -595,233 +555,248 @@ const ImageStudio = () => {
     [results],
   );
 
+  const hiddenResultSet = useMemo(
+    () => new Set(Array.isArray(hiddenResultIds) ? hiddenResultIds : []),
+    [hiddenResultIds],
+  );
+
+  const hideResultIds = useCallback((ids) => {
+    const cleanIds = ids.filter(Boolean);
+    if (cleanIds.length === 0) return;
+    setHiddenResultIds((prev) => {
+      const merged = Array.from(new Set([...(prev || []), ...cleanIds]));
+      localStorage.setItem(LS_HIDDEN_RESULTS, JSON.stringify(merged));
+      return merged;
+    });
+  }, []);
+
+  const extractImages = useCallback((data) => {
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data?.response?.data)) return data.response.data;
+    if (Array.isArray(data?.data?.data)) return data.data.data;
+    return [];
+  }, []);
+
+  const taskToItems = useCallback(
+    (task) => {
+      const taskData = task?.data || {};
+      const request = taskData.request || {};
+      const response = taskData.response || {};
+      const images = extractImages(response);
+      const submitTime = Number(task?.submit_time || task?.created_at || 0);
+      const startTime = Number(task?.start_time || 0);
+      const finishTime = Number(task?.finish_time || 0);
+      const submitMs = submitTime * 1000;
+      const ts = submitMs > 0 ? submitMs : Date.now();
+      const status = task?.status;
+      const imageCount = Math.max(1, Number(request.n) || images.length || 1);
+      const batchSize = Math.max(
+        1,
+        Number(request.batch_size) || imageCount,
+      );
+      const batchIndex = Number(request.batch_index) || null;
+      const durationSeconds =
+        finishTime > 0 && submitTime > 0
+          ? Math.max(0, finishTime - submitTime)
+          : null;
+      const base = {
+        taskId: task?.task_id,
+        parentBatchId: request.batch_id || task?.task_id,
+        model:
+          request.model ||
+          task?.properties?.origin_model_name ||
+          task?.properties?.upstream_model_name ||
+          '',
+        prompt: request.prompt || task?.properties?.input || '',
+        size: request.size || '',
+        mode:
+          request.mode ||
+          (task?.action === 'imageEdit' ? 'i2i' : 't2i'),
+        ts,
+        submitTime,
+        startTime,
+        finishTime,
+        durationSeconds,
+        batchSize,
+        costIsBatchTotal: imageCount > 1,
+        cost: typeof task?.quota === 'number' && task.quota > 0 ? task.quota : null,
+      };
+
+      if (status === 'SUCCESS' && images.length === 0) {
+        return [
+          {
+            ...base,
+            id: `${task.task_id}-1`,
+            batchId: task.task_id,
+            index: batchIndex || 1,
+            status: 'failed',
+            src: '',
+            ext: 'png',
+            error: t('未返回图片，请检查模型与配额'),
+          },
+        ];
+      }
+
+      if (status === 'SUCCESS') {
+        return images.map((image, index) => {
+          let src = '';
+          let ext = 'png';
+          if (image.url) {
+            src = image.url;
+            const match = image.url.match(/\.(png|jpe?g|webp|gif)(\?|$)/i);
+            if (match) ext = match[1].toLowerCase().replace('jpeg', 'jpg');
+          } else if (image.b64_json) {
+            src = `data:image/png;base64,${image.b64_json}`;
+          }
+          return {
+            ...base,
+            id: `${task.task_id}-${index + 1}`,
+            batchId: task.task_id,
+            index: batchIndex || index + 1,
+            status: src ? 'success' : 'failed',
+            src,
+            ext,
+            error: src ? '' : t('未返回图片，请检查模型与配额'),
+          };
+        });
+      }
+
+      const pendingCount = imageCount;
+      return Array.from({ length: pendingCount }, (_, index) => ({
+        ...base,
+        id: `${task.task_id}-${index + 1}`,
+        batchId: task.task_id,
+        index: batchIndex || index + 1,
+        status: status === 'FAILURE' ? 'failed' : 'pending',
+        src: '',
+        ext: 'png',
+        error: status === 'FAILURE' ? task.fail_reason || t('生成失败') : '',
+      }));
+    },
+    [extractImages, t],
+  );
+
+  const loadImageTasks = useCallback(
+    async (silent = false) => {
+      if (!silent) setTasksLoading(true);
+      try {
+        const res = await API.get('/api/task/self', {
+          disableDuplicate: true,
+          params: {
+            p: 1,
+            page_size: MAX_IMAGE_COUNT,
+            platform: IMAGE_STUDIO_PLATFORM,
+          },
+        });
+        if (res.data?.success) {
+          const items = res.data?.data?.items || [];
+          const mapped = items
+            .flatMap(taskToItems)
+            .filter(
+              (item) =>
+                !hiddenResultSet.has(item.taskId) &&
+                !hiddenResultSet.has(item.id),
+            );
+          setResults(mapped);
+          const lastDone = items.find(
+            (item) => item.status === 'SUCCESS' && typeof item.quota === 'number',
+          );
+          setLastCost(lastDone ? lastDone.quota : null);
+          return mapped;
+        }
+      } catch (e) {
+        if (!silent) showError(e);
+      } finally {
+        if (!silent) setTasksLoading(false);
+      }
+      return [];
+    },
+    [hiddenResultSet, taskToItems],
+  );
+
+  useEffect(() => {
+    const uid = userState?.user?.id;
+    if (uid == null) return undefined;
+    let stopped = false;
+    const refresh = async (silent = false) => {
+      const mapped = await loadImageTasks(silent);
+      if (stopped) return;
+      setLoading(mapped.some((item) => item.status === 'pending'));
+    };
+    refresh(false);
+    const timer = window.setInterval(() => refresh(true), IMAGE_TASK_POLL_INTERVAL);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [loadImageTasks, userState?.user?.id]);
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [loading]);
+
+  const getTaskElapsedSeconds = useCallback(
+    (item) => {
+      if (!item) return null;
+      if (item.durationSeconds != null) return item.durationSeconds;
+      if (item.status !== 'pending' || !item.submitTime) return null;
+      return Math.max(0, Math.floor(nowMs / 1000) - item.submitTime);
+    },
+    [nowMs],
+  );
+
   const handleGenerate = async () => {
     if (!canGenerate) return;
-    const startedAt = Date.now();
     const requestCount = Math.min(MAX_IMAGE_COUNT, Math.max(1, Number(n) || 1));
     if (requestCount !== n) {
       setN(requestCount);
     }
     const trimmedPrompt = prompt.trim();
-    const parentBatchId = `b-${startedAt}`;
-    const placeholders = Array.from({ length: requestCount }, (_, index) => ({
-      id: `${parentBatchId}-${index + 1}`,
-      status: 'pending',
-      index: index + 1,
-      src: '',
-      ext: 'png',
-      model,
-      prompt: trimmedPrompt,
-      size,
-      mode,
-      ts: startedAt,
-      parentBatchId,
-      batchId: `${parentBatchId}-${index + 1}`,
-      batchSize: 1,
-      cost: null,
-      error: '',
-    }));
-
-    setGenerationStartedAt(startedAt);
-    setGenerationElapsedSeconds(0);
-    setGenerationLogUseTime(null);
-    setWaitingForLogUseTime(false);
     setGenerationError('');
     setLastCost(null);
-    setResults((prev) => [...placeholders, ...prev]);
-    setLoading(true);
+    setSubmitting(true);
 
-    let successCount = 0;
-    let failedCount = 0;
-    let batchCostTotal = 0;
-    let logUseTimeTotal = 0;
-    let hasLogUseTime = false;
-    let logSyncStarted = false;
-    const usagePromises = [];
-
-    const extractImages = (data) => {
-      if (Array.isArray(data?.data)) return data.data;
-      if (Array.isArray(data?.data?.data)) return data.data.data;
-      return [];
-    };
-
-    const buildSingleImagePayload = async () => {
+    try {
       if (mode === 'i2i') {
         const fd = new FormData();
         fd.append('group', group);
         fd.append('model', model);
         fd.append('prompt', trimmedPrompt);
-        fd.append('n', '1');
+        fd.append('n', String(requestCount));
         fd.append('size', size);
         refFiles.forEach((file) => {
           fd.append(refFiles.length > 1 ? 'image[]' : 'image', file, file.name);
         });
-        return {
-          url: '/pg/images/edits',
-          body: fd,
-          config: {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            timeout: 5 * 60 * 1000,
-          },
-        };
-      }
-      return {
-        url: '/pg/images/generations',
-        body: {
-          group,
-          model,
-          prompt: trimmedPrompt,
-          n: 1,
-          size,
-        },
-        config: { timeout: 5 * 60 * 1000 },
-      };
-    };
-
-    const fetchUsageLog = async (requestId, resultId, itemBatchId) => {
-      if (!requestId) return;
-      setWaitingForLogUseTime(true);
-      for (let retryIndex = 0; retryIndex < 6; retryIndex++) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, retryIndex === 0 ? 800 : 1200),
-        );
-        try {
-          const logResponse = await API.get('/api/log/self', {
-            params: { p: 1, page_size: 10, request_id: requestId },
-          });
-          const items =
-            logResponse?.data?.data?.items ||
-            logResponse?.data?.data?.records ||
-            logResponse?.data?.data ||
-            [];
-          const list = Array.isArray(items) ? items : [];
-          const matched = list.find(
-            (item) =>
-              item &&
-              (item.request_id === requestId || item.requestId === requestId),
-          );
-          if (!matched) continue;
-
-          const useTime = Number(matched.use_time ?? matched.useTime);
-          if (Number.isFinite(useTime) && useTime >= 0) {
-            hasLogUseTime = true;
-            logUseTimeTotal += useTime;
-            setGenerationLogUseTime(logUseTimeTotal);
-          }
-
-          if (typeof matched.quota === 'number') {
-            const realCost = matched.quota;
-            batchCostTotal += realCost;
-            setLastCost(batchCostTotal);
-            setResults((prev) =>
-              prev.map((item) =>
-                item.id === resultId ? { ...item, cost: realCost } : item,
-              ),
-            );
-            updateHistoryCost(userState?.user?.id, itemBatchId, realCost);
-          }
-          return;
-        } catch (e) {}
-      }
-      if (!hasLogUseTime) {
-        setGenerationLogUseTime(null);
-      }
-    };
-
-    const markFailed = (placeholder, message) => {
-      failedCount += 1;
-      setResults((prev) =>
-        prev.map((item) =>
-          item.id === placeholder.id
-            ? { ...item, status: 'failed', error: message }
-            : item,
-        ),
-      );
-    };
-
-    const generateOne = async (placeholder) => {
-      try {
-        const payload = await buildSingleImagePayload();
+        const response = await API.post('/pg/image-studio/edits', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 30000,
+        });
+        if (response.data?.success === false) {
+          throw new Error(response.data?.message || t('提交失败'));
+        }
+      } else {
         const response = await API.post(
-          payload.url,
-          payload.body,
-          payload.config,
+          '/pg/image-studio/generations',
+          {
+            group,
+            model,
+            prompt: trimmedPrompt,
+            n: requestCount,
+            size,
+          },
+          { timeout: 30000 },
         );
-        const data = response.data;
-        if (data?.success === false) {
-          throw new Error(data.message || t('生成失败'));
+        if (response.data?.success === false) {
+          throw new Error(response.data?.message || t('提交失败'));
         }
-        const images = extractImages(data);
-        if (images.length === 0) {
-          throw new Error(t('未返回图片，请检查模型与配额'));
-        }
-
-        const image = images[0];
-        let src = '';
-        let ext = 'png';
-        if (image.url) {
-          src = image.url;
-          const match = image.url.match(/\.(png|jpe?g|webp|gif)(\?|$)/i);
-          if (match) ext = match[1].toLowerCase().replace('jpeg', 'jpg');
-        } else if (image.b64_json) {
-          src = `data:image/png;base64,${image.b64_json}`;
-        }
-        if (!src) {
-          throw new Error(t('未返回图片，请检查模型与配额'));
-        }
-
-        const requestId =
-          response?.headers?.['x-oneapi-request-id'] ||
-          response?.headers?.['X-Oneapi-Request-Id'] ||
-          '';
-        const resultItem = {
-          ...placeholder,
-          status: 'success',
-          src,
-          ext,
-          requestId,
-          cost: null,
-          error: '',
-        };
-        successCount += 1;
-        setResults((prev) =>
-          prev.map((item) => (item.id === placeholder.id ? resultItem : item)),
-        );
-        saveItems(userState?.user?.id, [resultItem]);
-
-        if (requestId) {
-          usagePromises.push(
-            fetchUsageLog(requestId, resultItem.id, resultItem.batchId),
-          );
-        }
-      } catch (error) {
-        const message =
-          error?.response?.data?.error?.message ||
-          error?.response?.data?.message ||
-          error?.message ||
-          t('生成失败');
-        markFailed(placeholder, message);
       }
-    };
 
-    const runQueue = async () => {
-      let nextIndex = 0;
-      const workerCount = Math.min(
-        IMAGE_REQUEST_CONCURRENCY,
-        placeholders.length,
-      );
-      const workers = Array.from({ length: workerCount }, async () => {
-        while (nextIndex < placeholders.length) {
-          const current = placeholders[nextIndex];
-          nextIndex += 1;
-          await generateOne(current);
-        }
-      });
-      await Promise.all(workers);
-    };
-
-    try {
-      await runQueue();
+      showSuccess(t('任务已提交'));
+      const mapped = await loadImageTasks(true);
+      setLoading(mapped.some((item) => item.status === 'pending'));
       API.get('/api/user/self')
         .then((r) => {
           if (r?.data?.success && r?.data?.data) {
@@ -829,43 +804,16 @@ const ImageStudio = () => {
           }
         })
         .catch(() => {});
-
-      if (successCount === requestCount) {
-        setGenerationError('');
-        showSuccess(t('生成成功'));
-      } else if (successCount > 0) {
-        const message = t('批量操作完成: {{success}}个成功, {{failed}}个失败', {
-          success: successCount,
-          failed: failedCount,
-        });
-        setGenerationError(message);
-        showError(message);
-      } else {
-        const message = t('生成失败');
-        setGenerationError(message);
-        showError(message);
-      }
-
-      if (usagePromises.length > 0) {
-        logSyncStarted = true;
-        Promise.allSettled(usagePromises).finally(() => {
-          setWaitingForLogUseTime(false);
-        });
-      }
     } catch (e) {
       const msg =
         e?.response?.data?.error?.message ||
         e?.response?.data?.message ||
         e?.message ||
-        t('生成失败');
+        t('提交失败');
       setGenerationError(msg);
       showError(msg);
     } finally {
-      setLoading(false);
-      setGenerationStartedAt(null);
-      if (!logSyncStarted) {
-        setWaitingForLogUseTime(false);
-      }
+      setSubmitting(false);
     }
   };
 
@@ -944,8 +892,8 @@ const ImageStudio = () => {
   };
 
   const removeOne = (id) => {
+    hideResultIds([id]);
     setResults((prev) => prev.filter((x) => x.id !== id));
-    deleteHistoryItem(userState?.user?.id, id);
   };
 
   // 把结果图作为参考图加入 i2i 上传列表
@@ -986,8 +934,8 @@ const ImageStudio = () => {
   };
 
   const clearAll = () => {
+    hideResultIds(results.map((item) => item.taskId || item.id));
     setResults([]);
-    clearAllHistory(userState?.user?.id);
   };
 
   // ZIP 打包下载
@@ -1512,28 +1460,22 @@ const ImageStudio = () => {
               theme='solid'
               size='large'
               block
-              loading={loading}
+              loading={submitting}
               disabled={!canGenerate}
               onClick={handleGenerate}
               icon={<IconBolt />}
               className='!h-12 !rounded-xl !text-base !font-semibold !bg-gradient-to-r !from-indigo-500 !via-purple-500 !to-pink-500 hover:!opacity-90'
             >
-              {loading ? t('生成中…') : t('生成图像')}
+              {submitting ? t('提交中…') : t('生成图像')}
             </Button>
 
-            {(loading ||
-              waitingForLogUseTime ||
-              generationLogUseTime != null) && (
+            {(loading || tasksLoading) && (
               <div className='flex items-center justify-between rounded-xl px-3 py-2 bg-semi-color-bg-2 border border-semi-color-border'>
                 <Text size='small' type='secondary'>
-                  {loading ? t('当前生成耗时') : t('使用日志耗时')}
+                  {t('任务状态')}
                 </Text>
                 <Text size='small' strong>
-                  {loading
-                    ? formatElapsedTime(generationElapsedSeconds)
-                    : generationLogUseTime != null
-                      ? formatLogUseTime(generationLogUseTime)
-                      : t('同步中…')}
+                  {tasksLoading ? t('同步中…') : t('生成中…')}
                 </Text>
               </div>
             )}
@@ -1588,9 +1530,17 @@ const ImageStudio = () => {
                             size='small'
                             className='block mt-1'
                           >
-                            {t('第 {{n}} 张', { n: it.index || 1 })} ·{' '}
-                            {formatElapsedTime(generationElapsedSeconds)}
+                            {t('第 {{n}} 张', { n: it.index || 1 })}
                           </Text>
+                          {getTaskElapsedSeconds(it) != null && (
+                            <Text
+                              type='tertiary'
+                              size='small'
+                              className='block mt-1'
+                            >
+                              {t('已等待')} {formatDuration(getTaskElapsedSeconds(it))}
+                            </Text>
+                          )}
                         </div>
                       </div>
                     ) : it.status === 'failed' ? (
@@ -1686,6 +1636,24 @@ const ImageStudio = () => {
                           i2i
                         </Tag>
                       )}
+                      {getTaskElapsedSeconds(it) != null && (
+                        <Tooltip
+                          content={
+                            it.status === 'pending'
+                              ? t('当前已等待时间')
+                              : t('生成耗时')
+                          }
+                        >
+                          <Tag
+                            size='small'
+                            color={it.status === 'pending' ? 'blue' : 'green'}
+                            type='light'
+                            prefixIcon={<IconClock />}
+                          >
+                            {formatDuration(getTaskElapsedSeconds(it))}
+                          </Tag>
+                        </Tooltip>
+                      )}
                       {it.status === 'pending' ? (
                         <Tag size='small' color='blue' type='ghost'>
                           {t('生成中…')}
@@ -1697,7 +1665,7 @@ const ImageStudio = () => {
                       ) : it.cost != null ? (
                         <Tooltip
                           content={
-                            it.batchSize > 1
+                            it.costIsBatchTotal && it.batchSize > 1
                               ? t('本次共 {{n}} 张，合计 {{c}}', {
                                   n: it.batchSize,
                                   c: renderQuota(it.cost, 4),
@@ -1709,7 +1677,7 @@ const ImageStudio = () => {
                         >
                           <Tag size='small' color='red' type='light'>
                             {renderQuota(
-                              it.batchSize > 1
+                              it.costIsBatchTotal && it.batchSize > 1
                                 ? it.cost / it.batchSize
                                 : it.cost,
                               4,
