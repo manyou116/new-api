@@ -66,9 +66,13 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeEmbeddings
 	} else if strings.HasPrefix(path, "/v1/moderations") {
 		relayMode = RelayModeModerations
-	} else if strings.HasPrefix(path, "/v1/images/generations") || strings.HasPrefix(path, "/pg/images/generations") {
+	} else if strings.HasPrefix(path, "/v1/images/generations") ||
+		strings.HasPrefix(path, "/pg/images/generations") ||
+		strings.HasPrefix(path, "/pg/image-studio/generations") {
 		relayMode = RelayModeImagesGenerations
-	} else if strings.HasPrefix(path, "/v1/images/edits") || strings.HasPrefix(path, "/pg/images/edits") {
+	} else if strings.HasPrefix(path, "/v1/images/edits") ||
+		strings.HasPrefix(path, "/pg/images/edits") ||
+		strings.HasPrefix(path, "/pg/image-studio/edits") {
 		relayMode = RelayModeImagesEdits
 	} else if strings.HasPrefix(path, "/v1/edits") {
 		relayMode = RelayModeEdits
