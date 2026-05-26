@@ -8,6 +8,8 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -104,6 +106,256 @@ func TestCalculateTextQuotaSummaryUsesSplitClaudeCacheCreationRatios(t *testing.
 
 	// 100 + remaining(5)*1 + 2*2 + 3*3 = 118
 	require.Equal(t, 118, summary.Quota)
+}
+
+func TestCalculateTextQuotaSummaryNoChargeEmptyTextOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	original := operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput
+	operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = true
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = original
+	})
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-4o",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 0,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 100, summary.PromptTokens)
+	require.Equal(t, 0, summary.CompletionTokens)
+	require.Equal(t, 100, summary.TotalTokens)
+	require.Equal(t, 0, summary.Quota)
+	require.True(t, summary.NoChargeEmptyOutput)
+	require.Equal(t, "empty_text_output", summary.NoChargeReason)
+}
+
+func TestCalculateTextQuotaSummaryNoChargeEmptyClaudeOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	original := operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput
+	operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = true
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = original
+	})
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeUnknown,
+		RelayFormat:     types.RelayFormatClaude,
+		OriginModelName: "claude-sonnet-4-5",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 0,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 0, summary.Quota)
+	require.True(t, summary.NoChargeEmptyOutput)
+	require.Equal(t, "empty_text_output", summary.NoChargeReason)
+}
+
+func TestCalculateTextQuotaSummaryNoChargeEmptyStreamError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	original := operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput
+	operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = true
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = original
+	})
+
+	streamStatus := relaycommon.NewStreamStatus()
+	streamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, nil)
+	relayInfo := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-4o",
+		IsStream:        true,
+		StreamStatus:    streamStatus,
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 0,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 0, summary.Quota)
+	require.True(t, summary.NoChargeEmptyOutput)
+	require.Equal(t, "empty_text_output_stream_error", summary.NoChargeReason)
+}
+
+func TestCalculateTextQuotaSummaryNoChargeEmptyOutputWithCachedInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	original := operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput
+	operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = true
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = original
+	})
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-4o",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			CacheRatio:      0.1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 0,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 100,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 100, summary.TotalTokens)
+	require.Equal(t, 0, summary.Quota)
+	require.True(t, summary.NoChargeEmptyOutput)
+}
+
+func TestCalculateTextQuotaSummaryNoChargeEmptyTextOutputCanBeDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	original := operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput
+	operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = false
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = original
+	})
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-4o",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 0,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 100, summary.Quota)
+	require.False(t, summary.NoChargeEmptyOutput)
+}
+
+func TestCalculateTextQuotaSummaryDoesNotNoChargeEmbeddingInputOnlyUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	original := operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput
+	operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = true
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = original
+	})
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeEmbeddings,
+		OriginModelName: "text-embedding-3-small",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 0,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 100, summary.Quota)
+	require.False(t, summary.NoChargeEmptyOutput)
+}
+
+func TestCalculateTextQuotaSummaryDoesNotNoChargeNativeGeminiEmbedding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	original := operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput
+	operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = true
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput = original
+	})
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeGemini,
+		RelayFormat:     types.RelayFormatGemini,
+		RequestURLPath:  "/v1beta/models/gemini-embedding-001:embedContent",
+		Request:         &dto.GeminiEmbeddingRequest{},
+		OriginModelName: "gemini-embedding-001",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 0,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 100, summary.Quota)
+	require.False(t, summary.NoChargeEmptyOutput)
 }
 
 func TestCalculateTextQuotaSummaryUsesAnthropicUsageSemanticFromUpstreamUsage(t *testing.T) {
