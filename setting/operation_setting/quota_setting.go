@@ -4,11 +4,13 @@ import "github.com/QuantumNous/new-api/setting/config"
 
 type QuotaSetting struct {
 	EnableFreeModelPreConsume bool `json:"enable_free_model_pre_consume"` // 是否对免费模型启用预消耗
+	NoChargeEmptyTextOutput   bool `json:"no_charge_empty_text_output"`   // 文本生成输出为空时不扣费
 }
 
 // 默认配置
 var quotaSetting = QuotaSetting{
 	EnableFreeModelPreConsume: true,
+	NoChargeEmptyTextOutput:   true,
 }
 
 func init() {

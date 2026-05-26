@@ -37,6 +37,7 @@ export default function SettingsCreditLimit(props) {
     QuotaForInviter: '',
     QuotaForInvitee: '',
     'quota_setting.enable_free_model_pre_consume': true,
+    'quota_setting.no_charge_empty_text_output': true,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -179,6 +180,21 @@ export default function SettingsCreditLimit(props) {
                     setInputs({
                       ...inputs,
                       'quota_setting.enable_free_model_pre_consume': value,
+                    })
+                  }
+                />
+              </Col>
+              <Col>
+                <Form.Switch
+                  label={t('文本生成输出为空时不扣费')}
+                  field={'quota_setting.no_charge_empty_text_output'}
+                  extraText={t(
+                    '开启后，文本生成请求有输入但没有输出 token 时，本次实际扣费为 0 并退还预扣费',
+                  )}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'quota_setting.no_charge_empty_text_output': value,
                     })
                   }
                 />

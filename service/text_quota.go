@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -51,6 +52,8 @@ type textQuotaSummary struct {
 	FileSearchCallCount      int
 	AudioInputPrice          float64
 	ImageGenerationCallPrice float64
+	NoChargeEmptyOutput      bool
+	NoChargeReason           string
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -75,6 +78,76 @@ func isLegacyClaudeDerivedOpenAIUsage(relayInfo *relaycommon.RelayInfo, usage *d
 		return false
 	}
 	return usage.ClaudeCacheCreation5mTokens > 0 || usage.ClaudeCacheCreation1hTokens > 0
+}
+
+func isTextGenerationRelayMode(relayMode int) bool {
+	switch relayMode {
+	case relayconstant.RelayModeChatCompletions,
+		relayconstant.RelayModeCompletions,
+		relayconstant.RelayModeEdits,
+		relayconstant.RelayModeResponses,
+		relayconstant.RelayModeResponsesCompact,
+		relayconstant.RelayModeGemini:
+		return true
+	default:
+		return false
+	}
+}
+
+func isTextGenerationRelay(relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil {
+		return false
+	}
+	if isTextGenerationRelayMode(relayInfo.RelayMode) {
+		return true
+	}
+	return relayInfo.RelayFormat == types.RelayFormatClaude
+}
+
+func isGeminiEmbeddingRequest(relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil || relayInfo.RelayFormat != types.RelayFormatGemini {
+		return false
+	}
+	switch relayInfo.Request.(type) {
+	case *dto.GeminiEmbeddingRequest, *dto.GeminiBatchEmbeddingRequest:
+		return true
+	}
+	return strings.Contains(relayInfo.RequestURLPath, ":embedContent") ||
+		strings.Contains(relayInfo.RequestURLPath, ":batchEmbedContents")
+}
+
+func shouldNoChargeEmptyTextOutput(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary *textQuotaSummary) (bool, string) {
+	if ctx == nil || relayInfo == nil || summary == nil {
+		return false, ""
+	}
+	if !operation_setting.GetQuotaSetting().NoChargeEmptyTextOutput {
+		return false, ""
+	}
+	if !isTextGenerationRelay(relayInfo) {
+		return false, ""
+	}
+	if isGeminiEmbeddingRequest(relayInfo) {
+		return false, ""
+	}
+	if summary.CompletionTokens != 0 || summary.TotalTokens <= 0 {
+		return false, ""
+	}
+	if summary.WebSearchCallCount > 0 ||
+		summary.ClaudeWebSearchCallCount > 0 ||
+		summary.FileSearchCallCount > 0 ||
+		summary.ImageGenerationCallPrice > 0 ||
+		summary.AudioInputPrice > 0 ||
+		summary.ImageTokens > 0 ||
+		summary.AudioTokens > 0 {
+		return false, ""
+	}
+	if adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason); adminRejectReason != "" {
+		return true, "empty_text_output_admin_reject"
+	}
+	if relayInfo.IsStream && relayInfo.StreamStatus != nil && !relayInfo.StreamStatus.IsNormalEnd() {
+		return true, "empty_text_output_stream_error"
+	}
+	return true, "empty_text_output"
 }
 
 func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) textQuotaSummary {
@@ -278,6 +351,12 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.Quota = 1
 	}
 
+	if ok, reason := shouldNoChargeEmptyTextOutput(ctx, relayInfo, &summary); ok {
+		summary.NoChargeEmptyOutput = true
+		summary.NoChargeReason = reason
+		summary.Quota = 0
+	}
+
 	return summary
 }
 
@@ -322,6 +401,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if summary.TotalTokens == 0 {
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
+	} else if summary.NoChargeEmptyOutput {
+		extraContent = append(extraContent, "文本生成输出为空，本次不扣费")
+		logger.LogWarn(ctx, fmt.Sprintf("empty text output, skip consuming quota, reason %s, userId %d, channelId %d, tokenId %d, model %s, promptTokens %d, pre-consumed quota %d", summary.NoChargeReason, relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, summary.PromptTokens, relayInfo.FinalPreConsumedQuota))
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, 0)
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
@@ -357,6 +440,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason
+	}
+	if summary.NoChargeEmptyOutput {
+		other["no_charge_empty_output"] = true
+		other["no_charge_reason"] = summary.NoChargeReason
 	}
 	if summary.ImageTokens != 0 {
 		other["image"] = true
