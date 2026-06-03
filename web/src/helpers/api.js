@@ -311,12 +311,21 @@ export const processGroupsData = (data, userGroup) => {
 
 // 原来components中的utils.js
 
-export async function getOAuthState() {
-  let path = '/api/oauth/state';
+export async function getOAuthState(options = {}) {
+  const { provider, redirectUri } = options;
+  const params = new URLSearchParams();
   let affCode = localStorage.getItem('aff');
   if (affCode && affCode.length > 0) {
-    path += `?aff=${affCode}`;
+    params.set('aff', affCode);
   }
+  if (provider) {
+    params.set('provider', provider);
+  }
+  if (redirectUri) {
+    params.set('redirect_uri', redirectUri);
+  }
+  const query = params.toString();
+  const path = query ? `/api/oauth/state?${query}` : '/api/oauth/state';
   const res = await API.get(path);
   const { success, message, data } = res.data;
   if (success) {
@@ -336,7 +345,7 @@ async function prepareOAuthState(options = {}) {
     localStorage.removeItem('user');
     updateAPI();
   }
-  return await getOAuthState();
+  return await getOAuthState(options);
 }
 
 export async function onDiscordOAuthClicked(client_id, options = {}) {
@@ -390,9 +399,13 @@ export async function onYaohuoOAuthClicked(
   yaohuo_client_id,
   options = { shouldLogout: false },
 ) {
-  const state = await prepareOAuthState(options);
-  if (!state) return;
   const redirect_uri = `${window.location.origin}/oauth/yaohuo`;
+  const state = await prepareOAuthState({
+    ...options,
+    provider: 'yaohuo',
+    redirectUri: redirect_uri,
+  });
+  if (!state) return;
   redirectToOAuthUrl(
     `https://yaohuo.me/OAuth/Authorize.aspx?response_type=code&client_id=${yaohuo_client_id}&redirect_uri=${redirect_uri}&scope=profile&state=${state}`,
   );

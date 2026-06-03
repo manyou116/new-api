@@ -3,7 +3,9 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -27,6 +29,15 @@ func GenerateOAuthCode(c *gin.Context) {
 	if affCode != "" {
 		session.Set("aff", affCode)
 	}
+	providerName := strings.TrimSpace(c.Query("provider"))
+	redirectURI := strings.TrimSpace(c.Query("redirect_uri"))
+	if providerName != "" || redirectURI != "" {
+		if err := validateOAuthRedirectURI(providerName, redirectURI); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		session.Set(oauth.RedirectURISessionKey(providerName), redirectURI)
+	}
 	session.Set("oauth_state", state)
 	err := session.Save()
 	if err != nil {
@@ -38,6 +49,32 @@ func GenerateOAuthCode(c *gin.Context) {
 		"message": "",
 		"data":    state,
 	})
+}
+
+func validateOAuthRedirectURI(providerName string, rawRedirectURI string) error {
+	if providerName == "" || rawRedirectURI == "" {
+		return fmt.Errorf("oauth provider and redirect_uri are required together")
+	}
+	if oauth.GetProvider(providerName) == nil {
+		return fmt.Errorf("unknown oauth provider: %s", providerName)
+	}
+	parsed, err := url.Parse(rawRedirectURI)
+	if err != nil {
+		return fmt.Errorf("invalid oauth redirect_uri: %s", err.Error())
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("invalid oauth redirect_uri scheme")
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("invalid oauth redirect_uri host")
+	}
+	if parsed.Path != "/oauth/"+providerName {
+		return fmt.Errorf("invalid oauth redirect_uri path")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("oauth redirect_uri must not include query or fragment")
+	}
+	return nil
 }
 
 // HandleOAuth handles OAuth callback for all standard OAuth providers
