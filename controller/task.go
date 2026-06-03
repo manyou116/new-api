@@ -86,6 +86,18 @@ func DeleteUserImageStudioTasks(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if deleted > 0 {
+		for _, taskID := range req.TaskIDs {
+			service.PublishImageStudioTaskEvent(&model.Task{
+				TaskID:    taskID,
+				UserId:    c.GetInt("id"),
+				Platform:  constant.TaskPlatformImageStudio,
+				Status:    model.TaskStatusFailure,
+				Progress:  "100%",
+				UpdatedAt: common.GetTimestamp(),
+			})
+		}
+	}
 
 	common.ApiSuccess(c, gin.H{
 		"deleted": deleted,
