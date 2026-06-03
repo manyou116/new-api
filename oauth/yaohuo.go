@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -58,16 +59,7 @@ func (p *YaohuoProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 
 	logger.LogDebug(ctx, "[OAuth-Yaohuo] ExchangeToken: code=%s...", code[:min(len(code), 10)])
 
-	// Build redirect URI from request context
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	// Forwards-compatible: support X-Forwarded-Proto
-	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
-	}
-	redirectURI := fmt.Sprintf("%s://%s/oauth/yaohuo", scheme, c.Request.Host)
+	redirectURI := p.getRedirectURI(c)
 
 	logger.LogDebug(ctx, "[OAuth-Yaohuo] ExchangeToken: redirect_uri=%s", redirectURI)
 
@@ -126,6 +118,41 @@ func (p *YaohuoProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 		TokenType:   tokenRes.TokenType,
 		ExpiresIn:   tokenRes.ExpiresIn,
 	}, nil
+}
+
+func (p *YaohuoProvider) getRedirectURI(c *gin.Context) string {
+	if redirectURI, ok := sessions.Default(c).Get(RedirectURISessionKey("yaohuo")).(string); ok {
+		redirectURI = strings.TrimSpace(redirectURI)
+		if p.isValidRedirectURI(redirectURI) {
+			return redirectURI
+		}
+	}
+
+	scheme := "http"
+	if c.Request != nil && c.Request.TLS != nil {
+		scheme = "https"
+	}
+	if proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); proto != "" {
+		scheme = strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
+	}
+
+	host := ""
+	if c.Request != nil {
+		host = c.Request.Host
+	}
+	if forwardedHost := strings.TrimSpace(c.GetHeader("X-Forwarded-Host")); forwardedHost != "" {
+		host = strings.TrimSpace(strings.Split(forwardedHost, ",")[0])
+	}
+
+	return fmt.Sprintf("%s://%s/oauth/yaohuo", scheme, host)
+}
+
+func (p *YaohuoProvider) isValidRedirectURI(rawRedirectURI string) bool {
+	parsed, err := url.Parse(rawRedirectURI)
+	if err != nil {
+		return false
+	}
+	return (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" && parsed.Path == "/oauth/yaohuo" && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func (p *YaohuoProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*OAuthUser, error) {

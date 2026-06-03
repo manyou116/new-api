@@ -7,6 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func RedirectURISessionKey(provider string) string {
+	return "oauth_redirect_uri_" + provider
+}
+
 // Provider defines the interface for OAuth providers
 type Provider interface {
 	// GetName returns the display name of the provider (e.g., "GitHub", "Discord")
