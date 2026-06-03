@@ -25,6 +25,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
@@ -427,7 +428,10 @@ func runImageStudioTask(snapshot imageStudioContext) {
 			reason := fmt.Sprintf("后台任务异常: %v", r)
 			logger.LogError(context.Background(), fmt.Sprintf("image studio task %s panic: %s\n%s", snapshot.TaskID, reason, string(debug.Stack())))
 			if task, exist, err := model.GetByOnlyTaskId(snapshot.TaskID); err == nil && exist {
-				failImageStudioTask(task, reason)
+				service.BackfillTaskBillingFromConsumeLog(context.Background(), task, snapshot.RequestID)
+				if failImageStudioTask(task, reason) && task.Quota > 0 {
+					service.RefundTaskQuota(context.Background(), task, task.FailReason)
+				}
 			}
 		}
 	}()
@@ -451,20 +455,26 @@ func runImageStudioTask(snapshot imageStudioContext) {
 	task.Status = model.TaskStatusInProgress
 	task.Progress = "10%"
 	task.StartTime = time.Now().Unix()
-	if rows, err := task.UpdateExisting(); err != nil {
+	if won, err := task.UpdateWithStatus(model.TaskStatusQueued); err != nil {
 		logger.LogError(context.Background(), fmt.Sprintf("image studio start task %s update failed: %s", task.TaskID, err.Error()))
 		return
-	} else if rows == 0 {
+	} else if !won {
 		return
 	}
 
 	payload, usage, quota, relayErr := executeImageStudioRelay(c, recorder)
 	if relayErr != nil {
-		failImageStudioTask(task, relayErr.Error())
+		service.BackfillTaskBillingFromConsumeLog(context.Background(), task, snapshot.RequestID)
+		if failImageStudioTask(task, relayErr.Error()) && task.Quota > 0 {
+			service.RefundTaskQuota(context.Background(), task, task.FailReason)
+		}
 		return
 	}
 	if payload == nil {
-		failImageStudioTask(task, "上游未返回图片")
+		service.BackfillTaskBillingFromConsumeLog(context.Background(), task, snapshot.RequestID)
+		if failImageStudioTask(task, "上游未返回图片") && task.Quota > 0 {
+			service.RefundTaskQuota(context.Background(), task, task.FailReason)
+		}
 		return
 	}
 
@@ -481,9 +491,35 @@ func runImageStudioTask(snapshot imageStudioContext) {
 		Response: payload,
 		Usage:    usage,
 	})
-	if _, updateErr := task.UpdateExisting(); updateErr != nil {
+	if won, updateErr := task.UpdateWithStatus(model.TaskStatusInProgress); updateErr != nil {
 		logger.LogError(context.Background(), fmt.Sprintf("image studio update task %s failed: %s", task.TaskID, updateErr.Error()))
+	} else if !won {
+		refundImageStudioChargeAfterLostFinalUpdate(snapshot.TaskID, snapshot.RequestID, quota)
 	}
+}
+
+func refundImageStudioChargeAfterLostFinalUpdate(taskId string, requestId string, quota int) {
+	if quota <= 0 {
+		return
+	}
+	task, exist, err := model.GetByOnlyTaskId(taskId)
+	if err != nil {
+		logger.LogError(context.Background(), fmt.Sprintf("image studio reload task %s after lost update failed: %s", taskId, err.Error()))
+		return
+	}
+	if !exist || task.Status != model.TaskStatusFailure || task.Quota > 0 {
+		return
+	}
+	service.BackfillTaskBillingFromConsumeLog(context.Background(), task, requestId)
+	if task.Quota <= 0 {
+		task.Quota = quota
+	}
+	task.UpdatedAt = time.Now().Unix()
+	if _, err := task.UpdateExisting(); err != nil {
+		logger.LogError(context.Background(), fmt.Sprintf("image studio backfill failed task %s quota failed: %s", task.TaskID, err.Error()))
+		return
+	}
+	service.RefundTaskQuota(context.Background(), task, "AI 画室任务已进入失败终态，取消迟到的生图扣费")
 }
 
 func executeImageStudioRelay(c *gin.Context, recorder *httptest.ResponseRecorder) (any, *dto.Usage, int, error) {
@@ -563,7 +599,11 @@ func parseImageStudioResponse(data []byte) (any, *dto.Usage, error) {
 	return payload, envelope.Usage, nil
 }
 
-func failImageStudioTask(task *model.Task, reason string) {
+func failImageStudioTask(task *model.Task, reason string) bool {
+	if task.Status == model.TaskStatusFailure || task.Status == model.TaskStatusSuccess {
+		return false
+	}
+	oldStatus := task.Status
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "生成失败，后台任务未返回错误详情"
@@ -573,7 +613,10 @@ func failImageStudioTask(task *model.Task, reason string) {
 	task.FailReason = reason
 	task.FinishTime = time.Now().Unix()
 	task.UpdatedAt = task.FinishTime
-	if _, err := task.UpdateExisting(); err != nil {
+	won, err := task.UpdateWithStatus(oldStatus)
+	if err != nil {
 		logger.LogError(context.Background(), fmt.Sprintf("image studio fail task %s update failed: %s", task.TaskID, err.Error()))
+		return false
 	}
+	return won
 }

@@ -147,6 +147,62 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
+type consumeLogBillingOther struct {
+	BillingSource  string `json:"billing_source"`
+	SubscriptionId int    `json:"subscription_id"`
+}
+
+// BackfillTaskBillingFromConsumeLog restores billing fields that may be missing
+// on locally executed tasks when the process exits after billing but before the
+// task row is finalized.
+func BackfillTaskBillingFromConsumeLog(ctx context.Context, task *model.Task, requestId string) bool {
+	requestId = strings.TrimSpace(requestId)
+	if task == nil || task.UserId == 0 || requestId == "" {
+		return false
+	}
+
+	logs, _, err := model.GetUserLogs(task.UserId, model.LogTypeConsume, 0, 0, "", "", 0, 1, "", requestId)
+	if err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("backfill task billing from consume log failed (task=%s, request_id=%s): %s", task.TaskID, requestId, err.Error()))
+		return false
+	}
+	if len(logs) == 0 {
+		return false
+	}
+
+	logEntry := logs[0]
+	if task.Quota == 0 && logEntry.Quota > 0 {
+		task.Quota = logEntry.Quota
+	}
+	if task.ChannelId == 0 {
+		task.ChannelId = logEntry.ChannelId
+	}
+	if task.Group == "" {
+		task.Group = logEntry.Group
+	}
+	if task.PrivateData.TokenId == 0 {
+		task.PrivateData.TokenId = logEntry.TokenId
+	}
+	if task.Properties.OriginModelName == "" {
+		task.Properties.OriginModelName = logEntry.ModelName
+	}
+
+	var other consumeLogBillingOther
+	if logEntry.Other != "" {
+		if err := common.UnmarshalJsonStr(logEntry.Other, &other); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("backfill task billing parse log other failed (task=%s, request_id=%s): %s", task.TaskID, requestId, err.Error()))
+		}
+	}
+	if task.PrivateData.BillingSource == "" && other.BillingSource != "" {
+		task.PrivateData.BillingSource = other.BillingSource
+	}
+	if task.PrivateData.SubscriptionId == 0 && other.SubscriptionId > 0 {
+		task.PrivateData.SubscriptionId = other.SubscriptionId
+	}
+
+	return true
+}
+
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {

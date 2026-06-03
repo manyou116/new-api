@@ -55,10 +55,13 @@ func sweepTimedOutTasks(ctx context.Context) {
 	timedOutCount := 0
 
 	for _, task := range tasks {
+		isLegacy := task.SubmitTime > 0 && task.SubmitTime < legacyTaskCutoff
 		if task.Platform == constant.TaskPlatformImageStudio {
+			if sweepTimedOutImageStudioTask(ctx, task, reason, legacyReason, now, isLegacy) {
+				timedOutCount++
+			}
 			continue
 		}
-		isLegacy := task.SubmitTime > 0 && task.SubmitTime < legacyTaskCutoff
 
 		oldStatus := task.Status
 		task.Status = model.TaskStatusFailure
@@ -88,6 +91,57 @@ func sweepTimedOutTasks(ctx context.Context) {
 	if timedOutCount > 0 {
 		logger.LogInfo(ctx, fmt.Sprintf("sweepTimedOutTasks: timed out %d tasks", timedOutCount))
 	}
+}
+
+func sweepTimedOutImageStudioTask(ctx context.Context, task *model.Task, reason string, legacyReason string, now int64, isLegacy bool) bool {
+	oldStatus := task.Status
+	if oldStatus == model.TaskStatusFailure || oldStatus == model.TaskStatusSuccess {
+		return false
+	}
+
+	requestId := imageStudioTaskRequestId(task)
+	if !isLegacy {
+		BackfillTaskBillingFromConsumeLog(ctx, task, requestId)
+	}
+
+	task.Status = model.TaskStatusFailure
+	task.Progress = "100%"
+	task.FinishTime = now
+	task.UpdatedAt = now
+	if isLegacy {
+		task.FailReason = legacyReason
+	} else {
+		task.FailReason = fmt.Sprintf("AI 画室任务超时（%d分钟），后台执行器可能已中断或服务已重启", constant.TaskTimeoutMinutes)
+	}
+
+	won, err := task.UpdateWithStatus(oldStatus)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("sweepTimedOutImageStudioTask CAS update error for task %s: %v", task.TaskID, err))
+		return false
+	}
+	if !won {
+		logger.LogInfo(ctx, fmt.Sprintf("sweepTimedOutImageStudioTask: task %s already transitioned, skip", task.TaskID))
+		return false
+	}
+	if !isLegacy && task.Quota > 0 {
+		RefundTaskQuota(ctx, task, task.FailReason)
+	}
+	return true
+}
+
+func imageStudioTaskRequestId(task *model.Task) string {
+	if task == nil || len(task.Data) == 0 {
+		return ""
+	}
+	var payload struct {
+		Request struct {
+			RequestId string `json:"request_id"`
+		} `json:"request"`
+	}
+	if err := common.Unmarshal(task.Data, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Request.RequestId)
 }
 
 // TaskPollingLoop 主轮询循环，每 15 秒检查一次未完成的任务
