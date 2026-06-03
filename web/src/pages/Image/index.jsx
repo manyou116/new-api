@@ -145,7 +145,16 @@ const PROMPT_PRESETS = [
 const MAX_IMAGE_COUNT = 100;
 const IMAGE_STUDIO_PLATFORM = 'image_studio';
 const IMAGE_TASK_POLL_INTERVAL = 3000;
+const IMAGE_TASK_SSE_POLL_INTERVAL = 60000;
+const IMAGE_TASK_SSE_REFRESH_DEBOUNCE = 300;
 const LS_HIDDEN_RESULTS = 'image_studio.hidden_results';
+
+const imageStudioTaskEventURL = () => {
+  const path = '/api/task/self/image-studio/events';
+  const base = import.meta.env.VITE_REACT_APP_SERVER_URL;
+  if (!base) return path;
+  return `${base.replace(/\/+$/, '')}${path}`;
+};
 
 const isDownloadableResult = (item) =>
   item && item.src && item.status !== 'pending' && item.status !== 'failed';
@@ -205,6 +214,8 @@ const ImageStudio = () => {
   const [mode, setMode] = useState('t2i');
   const [refFiles, setRefFiles] = useState([]); // File[]
   const fileInputRef = useRef(null);
+  const taskEventsConnectedRef = useRef(false);
+  const taskLastRefreshAtRef = useRef(0);
   const [refPreviews, setRefPreviews] = useState([]); // string[] dataURL
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -738,15 +749,65 @@ const ImageStudio = () => {
     const uid = userState?.user?.id;
     if (uid == null) return undefined;
     let stopped = false;
+    let refreshTimer = null;
+    let eventSource = null;
+    taskEventsConnectedRef.current = false;
+    taskLastRefreshAtRef.current = 0;
     const refresh = async (silent = false) => {
       const mapped = await loadImageTasks(silent);
+      taskLastRefreshAtRef.current = Date.now();
       if (stopped) return;
       setLoading(mapped.some((item) => item.status === 'pending'));
     };
+    const scheduleRefresh = () => {
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+      }
+      refreshTimer = window.setTimeout(
+        () => refresh(true),
+        IMAGE_TASK_SSE_REFRESH_DEBOUNCE,
+      );
+    };
     refresh(false);
-    const timer = window.setInterval(() => refresh(true), IMAGE_TASK_POLL_INTERVAL);
+    const timer = window.setInterval(() => {
+      const interval = taskEventsConnectedRef.current
+        ? IMAGE_TASK_SSE_POLL_INTERVAL
+        : IMAGE_TASK_POLL_INTERVAL;
+      if (Date.now() - taskLastRefreshAtRef.current >= interval) {
+        refresh(true);
+      }
+    }, IMAGE_TASK_POLL_INTERVAL);
+
+    if (typeof EventSource !== 'undefined') {
+      eventSource = new EventSource(imageStudioTaskEventURL(), {
+        withCredentials: true,
+      });
+      eventSource.addEventListener('connected', () => {
+        taskEventsConnectedRef.current = true;
+      });
+      eventSource.addEventListener('image_studio_task', scheduleRefresh);
+      eventSource.onerror = () => {
+        taskEventsConnectedRef.current = false;
+      };
+    }
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refresh(true);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       stopped = true;
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+      }
+      if (eventSource) {
+        eventSource.close();
+      }
+      taskEventsConnectedRef.current = false;
+      document.removeEventListener('visibilitychange', onVisible);
       window.clearInterval(timer);
     };
   }, [loadImageTasks, userState?.user?.id]);

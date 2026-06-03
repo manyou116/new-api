@@ -164,6 +164,7 @@ func CreateImageStudioTask(c *gin.Context) {
 			common.ApiError(c, insertErr)
 			return
 		}
+		service.PublishImageStudioTaskEvent(task)
 		insertedTasks = append(insertedTasks, task)
 		taskDtos = append(taskDtos, relay.TaskModel2Dto(task))
 
@@ -461,6 +462,7 @@ func runImageStudioTask(snapshot imageStudioContext) {
 	} else if !won {
 		return
 	}
+	service.PublishImageStudioTaskEvent(task)
 
 	payload, usage, quota, relayErr := executeImageStudioRelay(c, recorder)
 	if relayErr != nil {
@@ -495,6 +497,8 @@ func runImageStudioTask(snapshot imageStudioContext) {
 		logger.LogError(context.Background(), fmt.Sprintf("image studio update task %s failed: %s", task.TaskID, updateErr.Error()))
 	} else if !won {
 		refundImageStudioChargeAfterLostFinalUpdate(snapshot.TaskID, snapshot.RequestID, quota)
+	} else {
+		service.PublishImageStudioTaskEvent(task)
 	}
 }
 
@@ -520,6 +524,7 @@ func refundImageStudioChargeAfterLostFinalUpdate(taskId string, requestId string
 		return
 	}
 	service.RefundTaskQuota(context.Background(), task, "AI 画室任务已进入失败终态，取消迟到的生图扣费")
+	service.PublishImageStudioTaskEvent(task)
 }
 
 func executeImageStudioRelay(c *gin.Context, recorder *httptest.ResponseRecorder) (any, *dto.Usage, int, error) {
@@ -617,6 +622,9 @@ func failImageStudioTask(task *model.Task, reason string) bool {
 	if err != nil {
 		logger.LogError(context.Background(), fmt.Sprintf("image studio fail task %s update failed: %s", task.TaskID, err.Error()))
 		return false
+	}
+	if won {
+		service.PublishImageStudioTaskEvent(task)
 	}
 	return won
 }

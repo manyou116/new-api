@@ -126,6 +126,7 @@ func sweepTimedOutImageStudioTask(ctx context.Context, task *model.Task, reason 
 	if !isLegacy && task.Quota > 0 {
 		RefundTaskQuota(ctx, task, task.FailReason)
 	}
+	PublishImageStudioTaskEvent(task)
 	return true
 }
 
