@@ -99,7 +99,11 @@ API.interceptors.response.use(
     if (error.config && error.config.skipErrorHandler) {
       return Promise.reject(error);
     }
-    showError(error);
+    try {
+      showError(error);
+    } catch (showErrorException) {
+      console.error('showError failed:', showErrorException);
+    }
     return Promise.reject(error);
   },
 );
