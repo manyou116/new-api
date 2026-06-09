@@ -121,9 +121,21 @@ if (isMobileScreen) {
 
 export function showError(error) {
   console.error(error);
-  if (error.message) {
+  if (error?.message) {
     if (error.name === 'AxiosError') {
-      switch (error.response.status) {
+      const status = error.response?.status;
+      if (status === undefined || status === null) {
+        if (error.code === 'ECONNABORTED') {
+          Toast.error('错误：请求超时，请稍后重试');
+        } else if (error.code === 'ERR_CANCELED') {
+          Toast.error('错误：请求已取消');
+        } else {
+          Toast.error('错误：网络连接失败或服务器无响应');
+        }
+        return;
+      }
+
+      switch (status) {
         case 401:
           // 清除用户状态
           localStorage.removeItem('user');
