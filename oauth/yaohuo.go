@@ -2,12 +2,17 @@ package oauth
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -27,6 +32,25 @@ func init() {
 type YaohuoProvider struct {
 	// userInfoCache stores parsed user info keyed by access_token to bridge ExchangeToken → GetUserInfo
 	userInfoCache sync.Map
+}
+
+const yaohuoTokenMaxAttempts = 3
+
+var yaohuoTokenHTTPClient = &http.Client{
+	Timeout:   10 * time.Second,
+	Transport: newYaohuoTokenTransport(),
+}
+
+func newYaohuoTokenTransport() http.RoundTripper {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ForceAttemptHTTP2 = false
+	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	transport.TLSClientConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		MaxVersion: tls.VersionTLS12,
+		NextProtos: []string{"http/1.1"},
+	}
+	return transport
 }
 
 type yaohuoTokenResponse struct {
@@ -69,28 +93,59 @@ func (p *YaohuoProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 	data.Set("client_id", common.YaohuoClientId)
 	data.Set("client_secret", common.YaohuoClientSecret)
 	data.Set("redirect_uri", redirectURI)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://yaohuo.me/OAuth/Token.aspx", strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	client := http.Client{Timeout: 10 * time.Second}
-	res, err := client.Do(req)
-	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Yaohuo] ExchangeToken error: %s", err.Error()))
-		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "妖火"}, err.Error())
-	}
-	defer res.Body.Close()
-
-	logger.LogDebug(ctx, "[OAuth-Yaohuo] ExchangeToken response status: %d", res.StatusCode)
+	encodedData := data.Encode()
 
 	var tokenRes yaohuoTokenResponse
-	if err := common.DecodeJson(res.Body, &tokenRes); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-Yaohuo] ExchangeToken decode error: %s", err.Error()))
-		return nil, err
+	for attempt := 1; attempt <= yaohuoTokenMaxAttempts; attempt++ {
+		req, err := newYaohuoTokenRequest(ctx, encodedData)
+		if err != nil {
+			return nil, err
+		}
+
+		res, err := yaohuoTokenHTTPClient.Do(req)
+		if err != nil {
+			if attempt < yaohuoTokenMaxAttempts && yaohuoShouldRetryTokenError(ctx, err) {
+				logger.LogWarn(ctx, fmt.Sprintf("[OAuth-Yaohuo] ExchangeToken temporary request error, retrying attempt %d/%d: %s", attempt, yaohuoTokenMaxAttempts, err.Error()))
+				if waitErr := yaohuoWaitBeforeRetry(ctx, attempt); waitErr != nil {
+					return nil, waitErr
+				}
+				continue
+			}
+			logger.LogError(ctx, fmt.Sprintf("[OAuth-Yaohuo] ExchangeToken error: %s", err.Error()))
+			return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "妖火"}, err.Error())
+		}
+
+		logger.LogDebug(ctx, "[OAuth-Yaohuo] ExchangeToken response status: %d", res.StatusCode)
+
+		body, err := io.ReadAll(res.Body)
+		closeErr := res.Body.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			if attempt < yaohuoTokenMaxAttempts && yaohuoShouldRetryTokenError(ctx, err) {
+				logger.LogWarn(ctx, fmt.Sprintf("[OAuth-Yaohuo] ExchangeToken temporary response error, retrying attempt %d/%d: %s", attempt, yaohuoTokenMaxAttempts, err.Error()))
+				if waitErr := yaohuoWaitBeforeRetry(ctx, attempt); waitErr != nil {
+					return nil, waitErr
+				}
+				continue
+			}
+			logger.LogError(ctx, fmt.Sprintf("[OAuth-Yaohuo] ExchangeToken read error: %s", err.Error()))
+			return nil, err
+		}
+
+		if err := common.Unmarshal(body, &tokenRes); err != nil {
+			if attempt < yaohuoTokenMaxAttempts && yaohuoShouldRetryNonJSONTokenResponse(res.StatusCode, res.Header.Get("Content-Type"), body) {
+				logger.LogWarn(ctx, fmt.Sprintf("[OAuth-Yaohuo] ExchangeToken temporary non-JSON response, retrying attempt %d/%d: status=%d body=%s", attempt, yaohuoTokenMaxAttempts, res.StatusCode, yaohuoTokenResponsePreview(body)))
+				if waitErr := yaohuoWaitBeforeRetry(ctx, attempt); waitErr != nil {
+					return nil, waitErr
+				}
+				continue
+			}
+			logger.LogError(ctx, fmt.Sprintf("[OAuth-Yaohuo] ExchangeToken decode error: %s", err.Error()))
+			return nil, err
+		}
+		break
 	}
 
 	if tokenRes.AccessToken == "" {
@@ -118,6 +173,73 @@ func (p *YaohuoProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 		TokenType:   tokenRes.TokenType,
 		ExpiresIn:   tokenRes.ExpiresIn,
 	}, nil
+}
+
+func newYaohuoTokenRequest(ctx context.Context, encodedData string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://yaohuo.me/OAuth/Token.aspx", strings.NewReader(encodedData))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Connection", "close")
+	return req, nil
+}
+
+func yaohuoShouldRetryTokenError(ctx context.Context, err error) bool {
+	if err == nil || (ctx != nil && ctx.Err() != nil) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	errText := strings.ToLower(err.Error())
+	return errText == "eof" || strings.Contains(errText, "connection reset") || strings.Contains(errText, "reset by peer")
+}
+
+func yaohuoShouldRetryNonJSONTokenResponse(statusCode int, contentType string, body []byte) bool {
+	if yaohuoLooksLikeJSON(contentType, body) {
+		return false
+	}
+	if statusCode == http.StatusTooManyRequests || statusCode == http.StatusBadGateway || statusCode == http.StatusServiceUnavailable || statusCode == http.StatusGatewayTimeout {
+		return true
+	}
+	if statusCode >= 500 && statusCode <= 599 {
+		return true
+	}
+	bodyText := strings.ToLower(string(body))
+	return strings.Contains(bodyText, "temporarily") || strings.Contains(bodyText, "timeout") || strings.Contains(bodyText, "bad gateway") || strings.Contains(bodyText, "service unavailable")
+}
+
+func yaohuoLooksLikeJSON(contentType string, body []byte) bool {
+	if strings.Contains(strings.ToLower(contentType), "json") {
+		return true
+	}
+	trimmed := strings.TrimSpace(string(body))
+	return strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
+}
+
+func yaohuoTokenResponsePreview(body []byte) string {
+	preview := strings.TrimSpace(string(body))
+	if len(preview) > 200 {
+		return preview[:200] + "..."
+	}
+	return preview
+}
+
+func yaohuoWaitBeforeRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt) * 200 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (p *YaohuoProvider) getRedirectURI(c *gin.Context) string {
