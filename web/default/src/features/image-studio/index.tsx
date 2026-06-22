@@ -302,7 +302,11 @@ function ResultCard(props: ResultCardProps) {
           <Badge variant={isFailed ? 'destructive' : 'secondary'}>
             {item.mode === 'i2i' ? t('Image to image') : t('Text to image')}
           </Badge>
-          {item.size ? <Badge variant='outline'>{item.size}</Badge> : null}
+          {item.size ? (
+            <Badge variant={isFailed ? 'destructive' : 'secondary'}>
+              {item.size}
+            </Badge>
+          ) : null}
         </div>
 
         <div className='absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'>
@@ -1030,7 +1034,7 @@ export function ImageStudio() {
             </div>
           ) : null}
 
-          <div className='space-y-4 xl:sticky xl:top-4 xl:self-start'>
+          <div className='space-y-4 xl:sticky xl:top-4 xl:max-h-[calc(100svh-var(--app-header-height,0px)-8rem)] xl:self-start xl:overflow-y-auto xl:overscroll-contain xl:pr-1 xl:[scrollbar-gutter:stable]'>
             <Card className='border-primary/10 bg-gradient-to-br from-card via-card to-primary/5'>
               <CardHeader>
                 <CardTitle className='flex items-center gap-2'>
