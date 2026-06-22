@@ -114,7 +114,7 @@ func CompleteTopUpPayment(tradeNo string, expectedPaymentMethod string, callback
 	}
 
 	refCol := "`trade_no`"
-	if common.UsingPostgreSQL {
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 		refCol = `"trade_no"`
 	}
 
