@@ -20,6 +20,7 @@ import { api } from '@/lib/api'
 import type {
   RedemptionRequest,
   PaymentRequest,
+  AlipayNativePaymentRequest,
   AmountRequest,
   AffiliateTransferRequest,
   ApiResponse,
@@ -27,6 +28,7 @@ import type {
   RedemptionResponse,
   AmountResponse,
   PaymentResponse,
+  AlipayNativePaymentResponse,
   StripePaymentResponse,
   AffiliateCodeResponse,
   AffiliateTransferResponse,
@@ -106,6 +108,21 @@ export async function requestPayment(
     ...res.data,
     url: res.data.url || (res as unknown as { url?: string }).url,
   }
+}
+
+/**
+ * Request official Alipay native payment
+ */
+export async function requestAlipayNativePayment(
+  request: AlipayNativePaymentRequest
+): Promise<AlipayNativePaymentResponse> {
+  const body = new URLSearchParams()
+  body.set('amount', String(request.amount))
+  body.set('client_type', request.client_type || 'pc')
+  const res = await api.post('/api/user/alipay/pay', body, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
 }
 
 /**

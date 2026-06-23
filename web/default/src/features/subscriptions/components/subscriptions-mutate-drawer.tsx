@@ -23,6 +23,7 @@ import { CalendarClock, CreditCard, RefreshCw, Settings2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { MultiSelect } from '@/components/multi-select'
 import {
   Form,
   FormControl,
@@ -142,6 +143,10 @@ export function SubscriptionsMutateDrawer({
 
   const durationUnit = form.watch('duration_unit')
   const resetPeriod = form.watch('quota_reset_period')
+  const groupSelectOptions = groupOptions.map((group) => ({
+    label: group,
+    value: group,
+  }))
   // Gate "+ Create on Pancake" on the same checks the mint handler runs.
   const watchedTitle = form.watch('title')
   const watchedPrice = form.watch('price_amount')
@@ -491,6 +496,31 @@ export function SubscriptionsMutateDrawer({
 
               <FormField
                 control={form.control}
+                name='allowed_token_groups'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Allowed token groups')}</FormLabel>
+                    <FormControl>
+                      <MultiSelect
+                        options={groupSelectOptions}
+                        selected={field.value ?? []}
+                        onChange={field.onChange}
+                        placeholder={t('All groups')}
+                        allowCreate
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'When set, this plan quota only applies to matching token groups. Leave empty for all groups.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name='sort_order'
                 render={({ field }) => (
                   <FormItem>
@@ -554,6 +584,31 @@ export function SubscriptionsMutateDrawer({
                       <FormLabel className='!mt-0'>
                         {t('Allow wallet balance after quota used up')}
                       </FormLabel>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='disable_wallet_fallback'
+                  render={({ field }) => (
+                    <FormItem className={sideDrawerSwitchItemClassName()}>
+                      <div>
+                        <FormLabel className='!mt-0'>
+                          {t('Disable wallet fallback')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'For scoped token-group plans, block wallet balance fallback when subscription quota cannot cover the request.'
+                          )}
+                        </FormDescription>
+                      </div>
                       <FormControl>
                         <Switch
                           checked={field.value}

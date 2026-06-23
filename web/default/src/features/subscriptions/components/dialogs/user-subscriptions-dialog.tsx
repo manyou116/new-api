@@ -21,6 +21,7 @@ import { Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -51,6 +52,8 @@ import {
   createUserSubscription,
   invalidateUserSubscription,
   deleteUserSubscription,
+  extendUserSubscription,
+  resetUserSubscriptionQuota,
 } from '../../api'
 import { formatQuota } from '@/lib/format'
 import { formatTimestamp } from '../../lib'
@@ -104,8 +107,12 @@ export function UserSubscriptionsDialog(props: Props) {
   const [subs, setSubs] = useState<UserSubscriptionRecord[]>([])
   const [selectedPlanId, setSelectedPlanId] = useState<string>('')
   const [confirmAction, setConfirmAction] = useState<{
-    type: 'invalidate' | 'delete'
+    type: 'invalidate' | 'delete' | 'reset_quota'
     subId: number
+  } | null>(null)
+  const [extendTarget, setExtendTarget] = useState<{
+    subId: number
+    durationValue: number
   } | null>(null)
 
   const planTitleMap = useMemo(() => {
@@ -173,10 +180,17 @@ export function UserSubscriptionsDialog(props: Props) {
           await loadData()
           props.onSuccess?.()
         }
-      } else {
+      } else if (confirmAction.type === 'delete') {
         const res = await deleteUserSubscription(confirmAction.subId)
         if (res.success) {
           toast.success(t('Deleted'))
+          await loadData()
+          props.onSuccess?.()
+        }
+      } else {
+        const res = await resetUserSubscriptionQuota(confirmAction.subId)
+        if (res.success) {
+          toast.success(t('Reset succeeded'))
           await loadData()
           props.onSuccess?.()
         }
@@ -185,6 +199,27 @@ export function UserSubscriptionsDialog(props: Props) {
       toast.error(t('Operation failed'))
     } finally {
       setConfirmAction(null)
+    }
+  }
+
+  const handleExtendSubscription = async () => {
+    if (!extendTarget) return
+    try {
+      const res = await extendUserSubscription(extendTarget.subId, {
+        duration_unit: 'day',
+        duration_value: Number(extendTarget.durationValue || 0),
+        custom_seconds: 0,
+      })
+      if (res.success) {
+        toast.success(res.data?.message || t('Extended successfully'))
+        setExtendTarget(null)
+        await loadData()
+        props.onSuccess?.()
+      } else {
+        toast.error(res.message || t('Operation failed'))
+      }
+    } catch {
+      toast.error(t('Operation failed'))
     }
   }
 
@@ -324,6 +359,30 @@ export function UserSubscriptionsDialog(props: Props) {
                         <Button
                           size='sm'
                           variant='outline'
+                          onClick={() =>
+                            setExtendTarget({
+                              subId: sub.id,
+                              durationValue: 30,
+                            })
+                          }
+                        >
+                          {t('Extend')}
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() =>
+                            setConfirmAction({
+                              type: 'reset_quota',
+                              subId: sub.id,
+                            })
+                          }
+                        >
+                          {t('Reset quota')}
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='outline'
                           disabled={!isActive}
                           onClick={() =>
                             setConfirmAction({
@@ -363,19 +422,59 @@ export function UserSubscriptionsDialog(props: Props) {
           title={
             confirmAction.type === 'invalidate'
               ? t('Confirm invalidate')
-              : t('Confirm delete')
+              : confirmAction.type === 'reset_quota'
+                ? t('Confirm reset quota')
+                : t('Confirm delete')
           }
           desc={
             confirmAction.type === 'invalidate'
               ? t(
                   'After invalidating, this subscription will be immediately deactivated. Historical records are not affected. Continue?'
                 )
-              : t(
-                  'Deleting will permanently remove this subscription record (including benefit details). Continue?'
-                )
+              : confirmAction.type === 'reset_quota'
+                ? t(
+                    'This will reset used quota for the selected subscription without changing the total quota or expiry time. Continue?'
+                  )
+                : t(
+                    'Deleting will permanently remove this subscription record (including benefit details). Continue?'
+                  )
           }
           handleConfirm={handleConfirmAction}
           destructive={confirmAction.type === 'delete'}
+        />
+      )}
+
+      {extendTarget && (
+        <ConfirmDialog
+          open
+          onOpenChange={(v) => !v && setExtendTarget(null)}
+          title={t('Extend subscription')}
+          desc={
+            <div className='space-y-3'>
+              <p>
+                {t(
+                  'Extend this subscription by the specified number of days.'
+                )}
+              </p>
+              <Input
+                type='number'
+                min={1}
+                value={extendTarget.durationValue}
+                onChange={(event) =>
+                  setExtendTarget((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          durationValue:
+                            parseInt(event.target.value, 10) || 1,
+                        }
+                      : prev
+                  )
+                }
+              />
+            </div>
+          }
+          handleConfirm={handleExtendSubscription}
         />
       )}
     </>

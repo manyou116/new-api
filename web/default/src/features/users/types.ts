@@ -56,6 +56,13 @@ export const userSchema = z.object({
   created_at: z.number().optional(),
   updated_at: z.number().optional(),
   last_login_at: z.number().optional(),
+  last_request_at: z.number().optional(),
+  has_subscription: z.boolean().optional(),
+  subscription_plan: z.string().optional(),
+  has_two_fa: z.boolean().optional(),
+  has_passkey: z.boolean().optional(),
+  binding_count: z.number().optional(),
+  is_recently_active: z.boolean().optional(),
   DeletedAt: z.any().nullable().optional(),
   remark: z.string().optional(),
 })
@@ -124,6 +131,70 @@ export interface ManageUserQuotaPayload {
   action: 'add_quota'
   mode: QuotaAdjustMode
   value: number
+}
+
+export interface UserBindingSummaryItem {
+  key: string
+  label: string
+  value: string
+  binding_type?: string
+  provider_id?: number
+  is_custom?: boolean
+}
+
+export interface UserSubscriptionSummary {
+  subscription?: {
+    id: number
+    user_id?: number
+    plan_id?: number
+    status?: string
+    source?: string
+    start_time?: number
+    end_time?: number
+    amount_total?: number
+    amount_used?: number
+    next_reset_time?: number
+  }
+}
+
+export interface UserReviewSummary {
+  user: User
+  subscriptions?: UserSubscriptionSummary[]
+  usage?: Record<string, unknown>
+  security?: Record<string, unknown>
+  bindings?: UserBindingSummaryItem[]
+  available_groups?: Record<string, string>
+  has_subscription?: boolean
+  subscription_plan?: string
+  billing_preference?: string
+  has_two_fa?: boolean
+  has_passkey?: boolean
+  binding_count?: number
+  is_recently_active?: boolean
+  last_activity_at?: number
+  recently_active_days?: number
+}
+
+export interface AdminUserToken {
+  id: number
+  user_id: number
+  key: string
+  status: number
+  name: string
+  created_time: number
+  accessed_time: number
+  expired_time: number
+  remain_quota: number
+  unlimited_quota: boolean
+  used_quota: number
+  group: string
+}
+
+export interface AdminUserTokensData {
+  items?: AdminUserToken[]
+  total?: number
+  page?: number
+  page_size?: number
 }
 
 // ============================================================================

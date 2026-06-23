@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Crown, CalendarClock, Package } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -41,6 +41,7 @@ import {
   paySubscriptionCreem,
   paySubscriptionEpay,
   paySubscriptionWaffoPancake,
+  paySubscriptionAlipay,
   paySubscriptionBalance,
 } from '../../api'
 import { formatDuration, formatResetPeriod } from '../../lib'
@@ -66,19 +67,39 @@ interface Props {
   onPurchaseSuccess?: () => void | Promise<void>
 }
 
+function getPaymentUrl(data: unknown, key: 'pay_link' | 'checkout_url') {
+  if (!data || typeof data !== 'object') return ''
+  const value = (data as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value : ''
+}
+
 export function SubscriptionPurchaseDialog(props: Props) {
   const { t } = useTranslation()
   const { currency } = useSystemConfig()
   const [paying, setPaying] = useState(false)
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('')
+  const epayMethods = useMemo(
+    () =>
+      (props.epayMethods || []).filter(
+        (method) => method.type !== 'alipay_native'
+      ),
+    [props.epayMethods]
+  )
+  const alipayNativeMethod = useMemo(
+    () =>
+      (props.epayMethods || []).find(
+        (method) => method.type === 'alipay_native'
+      ),
+    [props.epayMethods]
+  )
 
   useEffect(() => {
-    if (props.open && props.epayMethods && props.epayMethods.length > 0) {
-      setSelectedEpayMethod(props.epayMethods[0].type)
+    if (props.open && epayMethods.length > 0) {
+      setSelectedEpayMethod(epayMethods[0].type)
     } else if (!props.open) {
       setSelectedEpayMethod('')
     }
-  }, [props.open, props.epayMethods])
+  }, [props.open, epayMethods])
 
   const plan = props.plan?.plan
   if (!plan) return null
@@ -87,12 +108,12 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const hasCreem = props.enableCreem && !!plan.creem_product_id
   const hasWaffoPancake =
     props.enableWaffoPancake && !!plan.waffo_pancake_product_id
-  const hasEpay =
-    props.enableOnlineTopUp && (props.epayMethods || []).length > 0
-  const hasAnyPayment = hasStripe || hasCreem || hasWaffoPancake || hasEpay
+  const hasAlipayNative = !!alipayNativeMethod
+  const hasEpay = props.enableOnlineTopUp && epayMethods.length > 0
+  const hasAnyPayment =
+    hasStripe || hasCreem || hasWaffoPancake || hasAlipayNative || hasEpay
   const selectedEpayMethodLabel =
-    (props.epayMethods || []).find((m) => m.type === selectedEpayMethod)
-      ?.name ||
+    epayMethods.find((m) => m.type === selectedEpayMethod)?.name ||
     selectedEpayMethod ||
     t('Select payment method')
   const totalAmount = Number(plan.total_amount || 0)
@@ -116,8 +137,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
     setPaying(true)
     try {
       const res = await paySubscriptionStripe({ plan_id: plan.id })
-      if (res.message === 'success' && res.data?.pay_link) {
-        window.open(res.data.pay_link, '_blank')
+      const payLink = getPaymentUrl(res.data, 'pay_link')
+      if (res.message === 'success' && payLink) {
+        window.open(payLink, '_blank')
         toast.success(t('Payment page opened'))
         props.onOpenChange(false)
       } else {
@@ -138,8 +160,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
     setPaying(true)
     try {
       const res = await paySubscriptionCreem({ plan_id: plan.id })
-      if (res.message === 'success' && res.data?.checkout_url) {
-        window.open(res.data.checkout_url, '_blank')
+      const checkoutUrl = getPaymentUrl(res.data, 'checkout_url')
+      if (res.message === 'success' && checkoutUrl) {
+        window.open(checkoutUrl, '_blank')
         toast.success(t('Payment page opened'))
         props.onOpenChange(false)
       } else {
@@ -162,9 +185,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
     setPaying(true)
     try {
       const res = await paySubscriptionWaffoPancake({ plan_id: plan.id })
-      if (res.message === 'success' && res.data?.checkout_url) {
+      const checkoutUrl = getPaymentUrl(res.data, 'checkout_url')
+      if (res.message === 'success' && checkoutUrl) {
         toast.success(t('Redirecting to payment page...'))
-        window.location.href = res.data.checkout_url
+        window.location.href = checkoutUrl
       } else {
         toast.error(
           res.message && res.message !== 'success'
@@ -183,6 +207,39 @@ export function SubscriptionPurchaseDialog(props: Props) {
     typeof navigator !== 'undefined' &&
     /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
+  const getClientType = () =>
+    typeof navigator !== 'undefined' &&
+    /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      ? 'wap'
+      : 'pc'
+
+  const handlePayAlipayNative = async () => {
+    setPaying(true)
+    try {
+      const res = await paySubscriptionAlipay({
+        plan_id: plan.id,
+        payment_method: 'alipay_native',
+        client_type: getClientType(),
+      })
+      const payUrl = typeof res.data === 'string' ? res.data : ''
+      if (res.message === 'success' && payUrl) {
+        window.open(payUrl, '_blank')
+        toast.success(t('Payment page opened'))
+        props.onOpenChange(false)
+      } else {
+        toast.error(
+          res.message && res.message !== 'success'
+            ? res.message
+            : t('Payment request failed')
+        )
+      }
+    } catch {
+      toast.error(t('Payment request failed'))
+    } finally {
+      setPaying(false)
+    }
+  }
+
   const handlePayEpay = async () => {
     if (!selectedEpayMethod) {
       toast.error(t('Please select a payment method'))
@@ -195,13 +252,17 @@ export function SubscriptionPurchaseDialog(props: Props) {
         payment_method: selectedEpayMethod,
       })
       if (res.message === 'success' && res.url) {
+        const formData =
+          res.data && typeof res.data === 'object' && !Array.isArray(res.data)
+            ? (res.data as Record<string, unknown>)
+            : {}
         const form = document.createElement('form')
         form.action = res.url
         form.method = 'POST'
         if (!isSafari) {
           form.target = '_blank'
         }
-        Object.entries(res.data || {}).forEach(([key, value]) => {
+        Object.entries(formData).forEach(([key, value]) => {
           const input = document.createElement('input')
           input.type = 'hidden'
           input.name = key
@@ -366,7 +427,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
             <p className='text-muted-foreground text-xs'>
               {t('Select payment method')}
             </p>
-            {(hasStripe || hasCreem || hasWaffoPancake) && (
+            {(hasStripe || hasCreem || hasWaffoPancake || hasAlipayNative) && (
               <div className='grid grid-cols-2 gap-2 sm:flex'>
                 {hasStripe && (
                   <Button
@@ -398,13 +459,23 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     Waffo Pancake
                   </Button>
                 )}
+                {hasAlipayNative && (
+                  <Button
+                    variant='outline'
+                    className='flex-1'
+                    onClick={handlePayAlipayNative}
+                    disabled={paying || limitReached}
+                  >
+                    {alipayNativeMethod?.name || t('Alipay')}
+                  </Button>
+                )}
               </div>
             )}
             {hasEpay && (
               <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
                 <Select
                   items={[
-                    ...(props.epayMethods || []).map((m) => ({
+                    ...epayMethods.map((m) => ({
                       value: m.type,
                       label: m.name || m.type,
                     })),
@@ -418,7 +489,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                   </SelectTrigger>
                   <SelectContent alignItemWithTrigger={false}>
                     <SelectGroup>
-                      {(props.epayMethods || []).map((m) => (
+                      {epayMethods.map((m) => (
                         <SelectItem key={m.type} value={m.type}>
                           {m.name || m.type}
                         </SelectItem>

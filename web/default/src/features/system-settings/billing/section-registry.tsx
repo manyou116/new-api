@@ -27,6 +27,7 @@ import { createSectionRegistry } from '../utils/section-registry'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
+  ModelSizePrice: settings.ModelSizePrice,
   ModelRatio: settings.ModelRatio,
   CacheRatio: settings.CacheRatio,
   CreateCacheRatio: settings.CreateCacheRatio,
@@ -139,6 +140,10 @@ const BILLING_SECTIONS = [
           MinTopUp: settings.MinTopUp,
           CustomCallbackAddress: settings.CustomCallbackAddress,
           PayMethods: settings.PayMethods,
+          AlipayAppId: settings.AlipayAppId,
+          AlipayPrivateKey: settings.AlipayPrivateKey,
+          AlipayPublicKey: settings.AlipayPublicKey,
+          AlipayProduction: settings.AlipayProduction,
           AmountOptions: settings['payment_setting.amount_options'],
           AmountDiscount: settings['payment_setting.amount_discount'],
           StripeApiSecret: settings.StripeApiSecret,

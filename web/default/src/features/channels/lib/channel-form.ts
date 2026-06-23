@@ -190,6 +190,7 @@ export const channelFormSchema = z
     pass_through_body_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
+    supported_image_size_tiers: z.array(z.string()).optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -203,6 +204,9 @@ export const channelFormSchema = z
     allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
+    image_generation_injection: z
+      .enum(['inherit', 'enabled', 'disabled'])
+      .optional(), // Responses image generation tool injection override
     // Upstream model update settings (stored in settings JSON)
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
@@ -329,6 +333,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   pass_through_body_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
+  supported_image_size_tiers: [],
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -342,6 +347,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
+  image_generation_injection: 'inherit',
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
@@ -366,6 +372,7 @@ export function transformChannelToFormDefaults(
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    supported_image_size_tiers: [] as string[],
   }
 
   if (channel.setting) {
@@ -378,6 +385,13 @@ export function transformChannelToFormDefaults(
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
+        supported_image_size_tiers: Array.isArray(
+          parsed.supported_image_size_tiers
+        )
+          ? parsed.supported_image_size_tiers
+              .map((item: unknown) => String(item).trim())
+              .filter(Boolean)
+          : [],
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -397,6 +411,7 @@ export function transformChannelToFormDefaults(
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
+  let imageGenerationInjection: 'inherit' | 'enabled' | 'disabled' = 'inherit'
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -416,6 +431,12 @@ export function transformChannelToFormDefaults(
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
+      imageGenerationInjection =
+        parsed.image_generation_injection === true
+          ? 'enabled'
+          : parsed.image_generation_injection === false
+            ? 'disabled'
+            : 'inherit'
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -474,6 +495,7 @@ export function transformChannelToFormDefaults(
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
     allow_safety_identifier: allowSafetyIdentifier,
+    image_generation_injection: imageGenerationInjection,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
@@ -485,13 +507,27 @@ export function transformChannelToFormDefaults(
  * Build the setting JSON string from form extra settings
  */
 function buildSettingJSON(formData: ChannelFormValues): string {
-  const settingObj = {
+  const settingObj: Record<string, unknown> = {
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy || '',
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
+  }
+  const supportedImageSizeTiers = Array.isArray(
+    formData.supported_image_size_tiers
+  )
+    ? Array.from(
+        new Set(
+          formData.supported_image_size_tiers
+            .map((tier) => tier.trim())
+            .filter(Boolean)
+        )
+      )
+    : []
+  if (supportedImageSizeTiers.length > 0) {
+    settingObj.supported_image_size_tiers = supportedImageSizeTiers
   }
   return JSON.stringify(settingObj)
 }
@@ -564,6 +600,14 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       delete settingsObj.allow_include_obfuscation
     if (formData.type !== 14 && 'allow_inference_geo' in settingsObj)
       delete settingsObj.allow_inference_geo
+  }
+
+  if (formData.image_generation_injection === 'enabled') {
+    settingsObj.image_generation_injection = true
+  } else if (formData.image_generation_injection === 'disabled') {
+    settingsObj.image_generation_injection = false
+  } else if ('image_generation_injection' in settingsObj) {
+    delete settingsObj.image_generation_injection
   }
 
   // Anthropic (type 14): claude_beta_query, allow_inference_geo, allow_speed

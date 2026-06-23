@@ -67,6 +67,7 @@ type PaymentMethodDialogProps = {
 
 const PAYMENT_TYPE_ICON_NAMES: Record<string, string> = {
   alipay: 'SiAlipay',
+  alipay_native: 'SiAlipay',
   stripe: 'SiStripe',
   waffo_pancake: 'LuCreditCard',
   wxpay: 'SiWechat',
@@ -89,6 +90,12 @@ export function PaymentMethodDialog({
       label: `${t('Alipay')} (Epay: alipay)`,
       name: t('Alipay'),
       value: 'alipay',
+    },
+    {
+      iconName: 'SiAlipay',
+      label: `${t('Official Alipay')} (alipay_native)`,
+      name: t('Official Alipay'),
+      value: 'alipay_native',
     },
     {
       iconName: 'SiWechat',

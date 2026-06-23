@@ -192,6 +192,39 @@ export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
         size: 120,
       },
       {
+        id: 'allowed_token_groups',
+        header: t('Token Groups'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => {
+          const plan = row.original.plan
+          const groups = String(plan.allowed_token_groups || '')
+            .split(',')
+            .map((group) => group.trim())
+            .filter(Boolean)
+          return (
+            <div className='space-y-1'>
+              {groups.length === 0 ? (
+                <span className='text-muted-foreground'>{t('All groups')}</span>
+              ) : (
+                <BadgeCell>
+                  {groups.map((group) => (
+                    <GroupBadge key={group} group={group} />
+                  ))}
+                </BadgeCell>
+              )}
+              {plan.disable_wallet_fallback && (
+                <StatusBadge
+                  label={t('No wallet fallback')}
+                  variant='warning'
+                  copyable={false}
+                />
+              )}
+            </div>
+          )
+        },
+        size: 170,
+      },
+      {
         id: 'actions',
         header: () => t('Actions'),
         cell: ({ row }) => <DataTableRowActions row={row} />,

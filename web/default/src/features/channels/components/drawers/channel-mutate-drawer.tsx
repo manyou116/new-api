@@ -198,6 +198,11 @@ const MODEL_MAPPING_PREVIEW_FALLBACK: Array<{
 
 const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded'
 const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8
+const IMAGE_SIZE_TIER_OPTIONS = [
+  { label: '1K', value: '1K' },
+  { label: '2K', value: '2K' },
+  { label: '4K', value: '4K' },
+]
 
 function readAdvancedSettingsPreference(): boolean {
   if (typeof window === 'undefined') return false
@@ -220,6 +225,15 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
+    (values.supported_image_size_tiers?.length ?? 0) > 0 ||
+    (values.image_generation_injection &&
+      values.image_generation_injection !== 'inherit') ||
+    values.allow_service_tier ||
+    values.disable_store ||
+    values.allow_safety_identifier ||
+    values.allow_include_obfuscation ||
+    values.allow_inference_geo ||
+    values.allow_speed ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -2953,6 +2967,74 @@ export function ChannelMutateDrawer({
                         title={t('Channel Extra Settings')}
                         icon={<Settings className='h-4 w-4' />}
                       />
+                      <div className='border-border/60 grid gap-4 border-y py-4 md:grid-cols-2'>
+                        <FormField
+                          control={form.control}
+                          name='supported_image_size_tiers'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>
+                                {t('Supported image size tiers')}
+                              </FormLabel>
+                              <FormControl>
+                                <MultiSelect
+                                  options={IMAGE_SIZE_TIER_OPTIONS}
+                                  selected={field.value ?? []}
+                                  onChange={field.onChange}
+                                  placeholder={t('Select tiers')}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Used by image routing and AI Studio to match 1K / 2K / 4K capable channels.'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='image_generation_injection'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>
+                                {t('Image generation injection')}
+                              </FormLabel>
+                              <Select
+                                value={field.value || 'inherit'}
+                                onValueChange={field.onChange}
+                              >
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent alignItemWithTrigger={false}>
+                                  <SelectGroup>
+                                    <SelectItem value='inherit'>
+                                      {t('Inherit global policy')}
+                                    </SelectItem>
+                                    <SelectItem value='enabled'>
+                                      {t('Force enable')}
+                                    </SelectItem>
+                                    <SelectItem value='disabled'>
+                                      {t('Force disable')}
+                                    </SelectItem>
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                              <FormDescription>
+                                {t(
+                                  'Override the global Responses image_generation tool injection policy for this channel.'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
                       {(currentType === 1 || currentType === 14) && (
                         <div className='border-border/60 flex flex-col gap-3 border-y py-4'>
                           <SubHeading

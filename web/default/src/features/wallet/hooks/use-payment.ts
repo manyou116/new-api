@@ -23,11 +23,13 @@ import {
   calculateAmount,
   calculateStripeAmount,
   calculateWaffoPancakeAmount,
+  requestAlipayNativePayment,
   requestPayment,
   requestStripePayment,
   isApiSuccess,
 } from '../api'
 import {
+  isAlipayNativePayment,
   isStripePayment,
   isWaffoPancakePayment,
   submitPaymentForm,
@@ -82,6 +84,7 @@ export function usePayment() {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
+        const isAlipayNative = isAlipayNativePayment(paymentType)
         const amount = Math.floor(topupAmount)
 
         const response = isStripe
@@ -89,10 +92,19 @@ export function usePayment() {
               amount,
               payment_method: 'stripe',
             })
-          : await requestPayment({
-              amount,
-              payment_method: paymentType,
-            })
+          : isAlipayNative
+            ? await requestAlipayNativePayment({
+                amount,
+                client_type:
+                  typeof navigator !== 'undefined' &&
+                  /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                    ? 'wap'
+                    : 'pc',
+              })
+            : await requestPayment({
+                amount,
+                payment_method: paymentType,
+              })
 
         if (!isApiSuccess(response)) {
           toast.error(response.message || i18next.t('Payment request failed'))
@@ -100,17 +112,37 @@ export function usePayment() {
         }
 
         // Handle Stripe payment
-        if (isStripe && response.data?.pay_link) {
-          window.open(response.data.pay_link as string, '_blank')
+        if (isStripe) {
+          const payLink =
+            response.data &&
+            typeof response.data === 'object' &&
+            'pay_link' in response.data
+              ? String((response.data as { pay_link?: string }).pay_link || '')
+              : ''
+          if (payLink) {
+            window.open(payLink, '_blank')
+            toast.success(i18next.t('Redirecting to payment page...'))
+            return true
+          }
+        }
+
+        // Handle official Alipay native payment
+        if (isAlipayNative && typeof response.data === 'string') {
+          window.open(response.data, '_blank')
           toast.success(i18next.t('Redirecting to payment page...'))
           return true
         }
 
         // Handle non-Stripe payment
-        if (!isStripe && response.data) {
+        if (
+          !isStripe &&
+          !isAlipayNative &&
+          response.data &&
+          typeof response.data === 'object'
+        ) {
           const url = (response as unknown as { url?: string }).url
           if (url) {
-            submitPaymentForm(url, response.data)
+            submitPaymentForm(url, response.data as Record<string, unknown>)
             toast.success(i18next.t('Redirecting to payment page...'))
             return true
           }

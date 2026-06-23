@@ -30,6 +30,7 @@ import {
   ShieldAlert,
   Link2,
   CreditCard,
+  ClipboardList,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -54,6 +55,7 @@ import {
 import { getUserActionMessage } from '../lib'
 import { type User, type ManageUserAction } from '../types'
 import { UserBindingDialog } from './dialogs/user-binding-dialog'
+import { UserReviewDialog } from './dialogs/user-review-dialog'
 import { useUsers } from './users-provider'
 
 interface DataTableRowActionsProps {
@@ -66,6 +68,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { setOpen, setCurrentRow, triggerRefresh } = useUsers()
   const [resetPasskeyOpen, setResetPasskeyOpen] = useState(false)
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
 
@@ -158,6 +161,18 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
+
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault()
+              setReviewDialogOpen(true)
+            }}
+          >
+            {t('Review User')}
+            <DropdownMenuShortcut>
+              <ClipboardList size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
 
           {isDisabled ? (
             <DropdownMenuItem onClick={() => handleManage('enable')}>
@@ -286,6 +301,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         onOpenChange={setBindingDialogOpen}
         userId={user.id}
         onUnbindSuccess={triggerRefresh}
+      />
+
+      <UserReviewDialog
+        open={reviewDialogOpen}
+        onOpenChange={setReviewDialogOpen}
+        user={user}
+        onSuccess={triggerRefresh}
       />
 
       <UserSubscriptionsDialog

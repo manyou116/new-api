@@ -26,6 +26,8 @@ import type {
   ManageUserAction,
   ManageUserQuotaPayload,
   ApiResponse,
+  UserReviewSummary,
+  AdminUserTokensData,
 } from './types'
 
 // ============================================================================
@@ -122,6 +124,70 @@ export async function adjustUserQuota(
   payload: ManageUserQuotaPayload
 ): Promise<ApiResponse<Partial<User>>> {
   const res = await api.post('/api/user/manage', payload)
+  return res.data
+}
+
+/**
+ * Get admin review summary for a user
+ */
+export async function getUserReview(
+  userId: number
+): Promise<ApiResponse<UserReviewSummary>> {
+  const res = await api.get(`/api/user/${userId}/review`)
+  return res.data
+}
+
+/**
+ * Update admin billing preference for a user
+ */
+export async function updateUserBillingPreference(
+  userId: number,
+  billingPreference: string
+): Promise<ApiResponse<{ billing_preference?: string }>> {
+  const res = await api.put(`/api/user/${userId}/billing-preference`, {
+    billing_preference: billingPreference,
+  })
+  return res.data
+}
+
+/**
+ * Update user group from review panel
+ */
+export async function updateUserGroup(
+  userId: number,
+  group: string
+): Promise<ApiResponse<{ group?: string }>> {
+  const res = await api.put(`/api/user/${userId}/group`, { group })
+  return res.data
+}
+
+export async function getAdminUserTokens(
+  userId: number,
+  page = 1,
+  pageSize = 20
+): Promise<ApiResponse<AdminUserTokensData>> {
+  const res = await api.get(
+    `/api/user/${userId}/tokens?p=${page}&page_size=${pageSize}`
+  )
+  return res.data
+}
+
+export async function revealAdminUserTokenKey(
+  userId: number,
+  tokenId: number
+): Promise<ApiResponse<{ key?: string }>> {
+  const res = await api.post(`/api/user/${userId}/tokens/${tokenId}/key`)
+  return res.data
+}
+
+export async function updateAdminUserTokenGroup(
+  userId: number,
+  tokenId: number,
+  group: string
+): Promise<ApiResponse<{ group?: string }>> {
+  const res = await api.put(`/api/user/${userId}/tokens/${tokenId}/group`, {
+    group,
+  })
   return res.data
 }
 

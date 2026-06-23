@@ -54,6 +54,10 @@ const MODELS_SECTIONS = [
               settings['global.chat_completions_to_responses_policy'],
               '{}'
             ),
+            image_generation_injection_policy: formatJsonForEditor(
+              settings['global.image_generation_injection_policy'],
+              '{}'
+            ),
           },
           general_setting: {
             ping_interval_enabled:

@@ -74,6 +74,20 @@ const chatToResponsesPolicyAllChannelsExample = JSON.stringify(
   2
 )
 
+const imageGenerationInjectionPolicyExample = JSON.stringify(
+  {
+    enabled: true,
+    all_channels: true,
+    model_patterns: ['gpt-5.5*', 'gpt-5.4*'],
+    unsupported_models: ['gpt-image-*'],
+    default_output_format: 'png',
+    default_size: '1024x1024',
+    default_quality: 'high',
+  },
+  null,
+  2
+)
+
 const jsonString = z.string().refine((value) => {
   const trimmed = value.trim()
   if (!trimmed) return true
@@ -90,6 +104,7 @@ const schema = z.object({
     pass_through_request_enabled: z.boolean(),
     thinking_model_blacklist: jsonString,
     chat_completions_to_responses_policy: jsonString,
+    image_generation_injection_policy: jsonString,
   }),
   general_setting: z.object({
     ping_interval_enabled: z.boolean(),
@@ -104,6 +119,7 @@ type FlatGlobalModelSettings = {
   'global.pass_through_request_enabled': boolean
   'global.thinking_model_blacklist': string
   'global.chat_completions_to_responses_policy': string
+  'global.image_generation_injection_policy': string
   'general_setting.ping_interval_enabled': boolean
   'general_setting.ping_interval_seconds': number
 }
@@ -119,6 +135,10 @@ const flattenGlobalValues = (
   ),
   'global.chat_completions_to_responses_policy': normalizeJsonText(
     values.global.chat_completions_to_responses_policy,
+    '{}'
+  ),
+  'global.image_generation_injection_policy': normalizeJsonText(
+    values.global.image_generation_injection_policy,
     '{}'
   ),
   'general_setting.ping_interval_enabled':
@@ -159,6 +179,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
     field:
       | 'global.thinking_model_blacklist'
       | 'global.chat_completions_to_responses_policy'
+      | 'global.image_generation_injection_policy'
   ) => {
     const raw = form.getValues(field)
     if (!raw || !raw.trim()) return
@@ -336,6 +357,84 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                       onClick={() =>
                         formatJsonField(
                           'global.chat_completions_to_responses_policy'
+                        )
+                      }
+                    >
+                      {t('Format JSON')}
+                    </Button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <Separator />
+
+          <div className='space-y-4'>
+            <div className='flex items-center gap-2'>
+              <h3 className='text-base font-semibold'>
+                {t('Image Generation Tool Injection')}
+              </h3>
+              <StatusBadge
+                label={t('Custom')}
+                variant='neutral'
+                copyable={false}
+              />
+            </div>
+
+            <Alert>
+              <AlertTitle>{t('Policy')}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  'Controls whether compatible image generation requests inject the image_generation tool globally. Channel-level overrides can still opt in, opt out, or inherit this policy.'
+                )}
+              </AlertDescription>
+            </Alert>
+
+            <FormField
+              control={form.control}
+              name='global.image_generation_injection_policy'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Image generation injection policy (JSON)')}
+                  </FormLabel>
+                  <FormControl>
+                    <Textarea
+                      rows={8}
+                      placeholder={`${t('Example:')}\n${imageGenerationInjectionPolicyExample}`}
+                      {...field}
+                      onChange={(event) => field.onChange(event.target.value)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Empty value will be saved as {}. Wildcard model patterns such as gpt-5.4* are supported by the backend policy matcher.'
+                    )}
+                  </FormDescription>
+                  <div className='flex flex-wrap gap-2'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() =>
+                        form.setValue(
+                          'global.image_generation_injection_policy',
+                          imageGenerationInjectionPolicyExample,
+                          { shouldDirty: true }
+                        )
+                      }
+                    >
+                      {t('Fill example policy')}
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() =>
+                        formatJsonField(
+                          'global.image_generation_injection_policy'
                         )
                       }
                     >

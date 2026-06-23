@@ -189,6 +189,7 @@ export type ModelSettings = {
   'global.pass_through_request_enabled': boolean
   'global.thinking_model_blacklist': string
   'global.chat_completions_to_responses_policy': string
+  'global.image_generation_injection_policy': string
   'general_setting.ping_interval_enabled': boolean
   'general_setting.ping_interval_seconds': number
   'gemini.safety_settings': string
@@ -205,6 +206,7 @@ export type ModelSettings = {
   'grok.violation_deduction_enabled': boolean
   'grok.violation_deduction_amount': number
   ModelPrice: string
+  ModelSizePrice: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -259,6 +261,7 @@ export type BillingSettings = {
   DisplayInCurrencyEnabled: boolean
   DisplayTokenStatEnabled: boolean
   ModelPrice: string
+  ModelSizePrice: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -284,6 +287,10 @@ export type BillingSettings = {
   MinTopUp: number
   CustomCallbackAddress: string
   PayMethods: string
+  AlipayAppId: string
+  AlipayPrivateKey: string
+  AlipayPublicKey: string
+  AlipayProduction: boolean
   'payment_setting.amount_options': string
   'payment_setting.amount_discount': string
   'payment_setting.compliance_confirmed': boolean

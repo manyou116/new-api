@@ -86,6 +86,7 @@ export interface ChannelSettings {
   pass_through_body_enabled?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
+  supported_image_size_tiers?: string[]
 }
 
 export interface ChannelOtherSettings {
@@ -100,6 +101,7 @@ export interface ChannelOtherSettings {
   allow_inference_geo?: boolean
   allow_speed?: boolean
   claude_beta_query?: boolean
+  image_generation_injection?: boolean | null
   upstream_model_update_check_enabled?: boolean
   upstream_model_update_auto_sync_enabled?: boolean
   upstream_model_update_ignored_models?: string[]

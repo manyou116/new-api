@@ -44,6 +44,7 @@ import {
 
 type ModelFormValues = {
   ModelPrice: string
+  ModelSizePrice: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -67,6 +68,7 @@ type ModelRatioFormProps = {
 
 type ModelJsonFieldName =
   | 'ModelPrice'
+  | 'ModelSizePrice'
   | 'ModelRatio'
   | 'CacheRatio'
   | 'CreateCacheRatio'
@@ -85,6 +87,12 @@ const modelJsonFields: Array<{
     labelKey: 'Model fixed pricing',
     descriptionKey:
       'JSON map of model → USD cost per request. Takes precedence over ratio based billing.',
+  },
+  {
+    name: 'ModelSizePrice',
+    labelKey: 'Model size pricing',
+    descriptionKey:
+      'JSON map of model → resolution tier prices, for example {"gpt-image-2":{"1K":0.04,"2K":0.08,"4K":0.16}}. Matched tiers override fixed model pricing.',
   },
   {
     name: 'ModelRatio',

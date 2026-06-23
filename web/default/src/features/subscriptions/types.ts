@@ -37,6 +37,8 @@ export const subscriptionPlanSchema = z.object({
   sort_order: z.number(),
   allow_balance_pay: z.boolean().optional().default(true),
   allow_wallet_overflow: z.boolean().optional().default(true),
+  allowed_token_groups: z.string().optional(),
+  disable_wallet_fallback: z.boolean().optional().default(false),
   max_purchase_per_user: z.number(),
   total_amount: z.number(),
   upgrade_group: z.string().optional(),
@@ -92,24 +94,27 @@ export interface PlanPayload {
 export interface SubscriptionPayRequest {
   plan_id: number
   payment_method?: string
+  client_type?: 'pc' | 'wap' | 'qr'
 }
 
 export interface SubscriptionPayResponse {
   success: boolean
   message?: string
-  data?: {
-    // Stripe-style hosted checkout link.
-    pay_link?: string
-    // Waffo Pancake / Creem hosted checkout URL.
-    checkout_url?: string
-    // Pancake-only: order metadata + self-service buyer session token,
-    // surfaced for future flows (refund / cancel from new-api's own UI).
-    session_id?: string
-    expires_at?: number | string
-    order_id?: string
-    token?: string
-    token_expires_at?: number | string
-  }
+  data?:
+    | string
+    | {
+        // Stripe-style hosted checkout link.
+        pay_link?: string
+        // Waffo Pancake / Creem hosted checkout URL.
+        checkout_url?: string
+        // Pancake-only: order metadata + self-service buyer session token,
+        // surfaced for future flows (refund / cancel from new-api's own UI).
+        session_id?: string
+        expires_at?: number | string
+        order_id?: string
+        token?: string
+        token_expires_at?: number | string
+      }
   url?: string
 }
 

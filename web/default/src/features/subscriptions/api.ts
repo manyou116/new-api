@@ -104,6 +104,30 @@ export async function deleteUserSubscription(
   return res.data
 }
 
+export async function extendUserSubscription(
+  subId: number,
+  data: {
+    duration_unit: 'year' | 'month' | 'day' | 'hour' | 'custom'
+    duration_value: number
+    custom_seconds?: number
+  }
+): Promise<ApiResponse<{ message?: string }>> {
+  const res = await api.post(
+    `/api/subscription/admin/user_subscriptions/${subId}/extend`,
+    data
+  )
+  return res.data
+}
+
+export async function resetUserSubscriptionQuota(
+  subId: number
+): Promise<ApiResponse> {
+  const res = await api.post(
+    `/api/subscription/admin/user_subscriptions/${subId}/reset_quota`
+  )
+  return res.data
+}
+
 // ============================================================================
 // User-facing Subscription Payment
 // ============================================================================
@@ -126,6 +150,15 @@ export async function paySubscriptionWaffoPancake(
   data: SubscriptionPayRequest
 ): Promise<SubscriptionPayResponse> {
   const res = await api.post('/api/subscription/waffo-pancake/pay', data)
+  return res.data
+}
+
+export async function paySubscriptionAlipay(
+  data: SubscriptionPayRequest
+): Promise<SubscriptionPayResponse> {
+  const res = await api.post('/api/subscription/alipay/pay', data, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
   return res.data
 }
 

@@ -117,6 +117,10 @@ const paymentSchema = z.object({
       })
     }
   }),
+  AlipayAppId: z.string(),
+  AlipayPrivateKey: z.string(),
+  AlipayPublicKey: z.string(),
+  AlipayProduction: z.boolean(),
   AmountOptions: z.string().superRefine((value, ctx) => {
     const error = getJsonError(value, (parsed) => Array.isArray(parsed))
     if (error) {
@@ -423,6 +427,10 @@ export function PaymentSettingsSection({
       MinTopUp: values.MinTopUp,
       CustomCallbackAddress: removeTrailingSlash(values.CustomCallbackAddress),
       PayMethods: values.PayMethods.trim(),
+      AlipayAppId: values.AlipayAppId.trim(),
+      AlipayPrivateKey: values.AlipayPrivateKey.trim(),
+      AlipayPublicKey: values.AlipayPublicKey.trim(),
+      AlipayProduction: values.AlipayProduction,
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
       StripeApiSecret: values.StripeApiSecret.trim(),
@@ -467,6 +475,10 @@ export function PaymentSettingsSection({
         initialRef.current.CustomCallbackAddress
       ),
       PayMethods: initialRef.current.PayMethods.trim(),
+      AlipayAppId: initialRef.current.AlipayAppId.trim(),
+      AlipayPrivateKey: initialRef.current.AlipayPrivateKey.trim(),
+      AlipayPublicKey: initialRef.current.AlipayPublicKey.trim(),
+      AlipayProduction: initialRef.current.AlipayProduction,
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
@@ -538,6 +550,34 @@ export function PaymentSettingsSection({
       normalizeJsonForComparison(initial.PayMethods)
     ) {
       updates.push({ key: 'PayMethods', value: sanitized.PayMethods })
+    }
+
+    if (sanitized.AlipayAppId !== initial.AlipayAppId) {
+      updates.push({ key: 'AlipayAppId', value: sanitized.AlipayAppId })
+    }
+
+    if (
+      sanitized.AlipayPrivateKey &&
+      sanitized.AlipayPrivateKey !== initial.AlipayPrivateKey
+    ) {
+      updates.push({
+        key: 'AlipayPrivateKey',
+        value: sanitized.AlipayPrivateKey,
+      })
+    }
+
+    if (
+      sanitized.AlipayPublicKey &&
+      sanitized.AlipayPublicKey !== initial.AlipayPublicKey
+    ) {
+      updates.push({ key: 'AlipayPublicKey', value: sanitized.AlipayPublicKey })
+    }
+
+    if (sanitized.AlipayProduction !== initial.AlipayProduction) {
+      updates.push({
+        key: 'AlipayProduction',
+        value: sanitized.AlipayProduction,
+      })
     }
 
     if (
@@ -875,9 +915,12 @@ export function PaymentSettingsSection({
           />
           <Tabs defaultValue='general' className='min-w-0'>
             <div className='overflow-x-auto pb-1'>
-              <TabsList className='grid min-w-[44rem] grid-cols-6'>
+              <TabsList className='grid min-w-[52rem] grid-cols-7'>
                 <TabsTrigger value='general'>{t('General')}</TabsTrigger>
                 <TabsTrigger value='epay'>Epay</TabsTrigger>
+                <TabsTrigger value='alipay-native'>
+                  {t('Alipay')}
+                </TabsTrigger>
                 <TabsTrigger value='stripe'>{t('Stripe')}</TabsTrigger>
                 <TabsTrigger value='creem'>Creem</TabsTrigger>
                 <TabsTrigger value='waffo-pancake'>Waffo Pancake</TabsTrigger>
@@ -1230,6 +1273,137 @@ export function PaymentSettingsSection({
                         </FormControl>
                         <FormDescription>
                           {t('Leave blank unless rotating the secret')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent
+              value='alipay-native'
+              className={paymentTabContentClassName}
+            >
+              <div className='space-y-4'>
+                <div>
+                  <h3 className='text-lg font-medium'>
+                    {t('Alipay official gateway')}
+                  </h3>
+                  <p className='text-muted-foreground text-sm'>
+                    {t(
+                      'Configuration for direct Alipay Open Platform cashier payments.'
+                    )}
+                  </p>
+                </div>
+
+                <Alert>
+                  <ShieldAlert className='h-4 w-4' />
+                  <AlertTitle>{t('Alipay native payments')}</AlertTitle>
+                  <AlertDescription>
+                    {t(
+                      'Fill in the Alipay Open Platform app parameters. Once configured, users can be redirected directly to the official Alipay cashier.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='AlipayAppId'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Alipay App ID')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder='2021000000000000'
+                            autoComplete='off'
+                            {...field}
+                            onChange={(event) =>
+                              field.onChange(event.target.value)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Application ID from Alipay Open Platform')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='AlipayProduction'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Production mode')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Disable this switch to use Alipay sandbox mode.'
+                            )}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+                </div>
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='AlipayPrivateKey'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Application private key')}</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            rows={6}
+                            placeholder={t('Leave blank unless rotating key')}
+                            autoComplete='new-password'
+                            className='font-mono text-xs'
+                            {...field}
+                            onChange={(event) =>
+                              field.onChange(event.target.value)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('RSA2 private key. Sensitive value is not shown.')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='AlipayPublicKey'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Alipay public key')}</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            rows={6}
+                            placeholder={t('Leave blank unless rotating key')}
+                            autoComplete='new-password'
+                            className='font-mono text-xs'
+                            {...field}
+                            onChange={(event) =>
+                              field.onChange(event.target.value)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Public key generated by Alipay Open Platform.')}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
