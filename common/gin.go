@@ -19,6 +19,7 @@ import (
 
 const KeyRequestBody = "key_request_body"
 const KeyBodyStorage = "key_body_storage"
+const KeyOriginalMultipartContentType = "_original_multipart_ct"
 
 var ErrRequestBodyTooLarge = errors.New("request body too large")
 
@@ -265,11 +266,11 @@ func ParseMultipartFormReusable(c *gin.Context) (*multipart.Form, error) {
 	// Use the original Content-Type saved on first call to avoid boundary
 	// mismatch when callers overwrite c.Request.Header after multipart rebuild.
 	var contentType string
-	if saved, ok := c.Get("_original_multipart_ct"); ok {
+	if saved, ok := c.Get(KeyOriginalMultipartContentType); ok {
 		contentType = saved.(string)
 	} else {
 		contentType = c.Request.Header.Get("Content-Type")
-		c.Set("_original_multipart_ct", contentType)
+		c.Set(KeyOriginalMultipartContentType, contentType)
 	}
 	boundary, err := parseBoundary(contentType)
 	if err != nil {
@@ -323,11 +324,11 @@ func parseFormData(data []byte, v any) error {
 
 func parseMultipartFormData(c *gin.Context, data []byte, v any) error {
 	var contentType string
-	if saved, ok := c.Get("_original_multipart_ct"); ok {
+	if saved, ok := c.Get(KeyOriginalMultipartContentType); ok {
 		contentType = saved.(string)
 	} else {
 		contentType = c.Request.Header.Get("Content-Type")
-		c.Set("_original_multipart_ct", contentType)
+		c.Set(KeyOriginalMultipartContentType, contentType)
 	}
 	boundary, err := parseBoundary(contentType)
 	if err != nil {

@@ -100,6 +100,70 @@ func TestBuildImageStudioJSONBodiesForcesURLResponseFormat(t *testing.T) {
 	}
 }
 
+func TestImageStudioMultipartSnapshotUsesRebuiltBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	_ = writer.WriteField("model", "gpt-image-2")
+	_ = writer.WriteField("prompt", "draw")
+	_ = writer.WriteField("n", "2")
+	part, err := writer.CreateFormFile("image", "ref.png")
+	if err != nil {
+		t.Fatalf("create form file failed: %v", err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("x"), 8192)); err != nil {
+		t.Fatalf("write form file failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/pg/image-studio/edits", bytes.NewReader(buf.Bytes()))
+	originalContentType := writer.FormDataContentType()
+	req.Header.Set("Content-Type", originalContentType)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = req
+
+	storage, err := common.CreateBodyStorage(buf.Bytes())
+	if err != nil {
+		t.Fatalf("create body storage failed: %v", err)
+	}
+	defer storage.Close()
+	c.Set(common.KeyBodyStorage, storage)
+
+	bodies, err := buildImageStudioTaskBodies(c, originalContentType, buf.Bytes(), 2)
+	if err != nil {
+		t.Fatalf("build bodies failed: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 bodies, got %d", len(bodies))
+	}
+	if bodies[0].ContentType == originalContentType {
+		t.Fatal("expected rebuilt multipart body to have a new boundary")
+	}
+
+	snapshot := captureImageStudioContext(c, "task_img", "request_id", bodies[0].ContentType, bodies[0].Body)
+	replayed, _, err := snapshot.ginContext()
+	if err != nil {
+		t.Fatalf("create replay context failed: %v", err)
+	}
+	defer common.CleanupBodyStorage(replayed)
+
+	form, err := common.ParseMultipartFormReusable(replayed)
+	if err != nil {
+		t.Fatalf("parse replay multipart failed: %v", err)
+	}
+	defer form.RemoveAll()
+	if got := url.Values(form.Value).Get("n"); got != "1" {
+		t.Fatalf("expected replay n=1, got %q", got)
+	}
+	if len(form.File["image"]) != 1 {
+		t.Fatalf("expected replay image file, got %d", len(form.File["image"]))
+	}
+}
+
 func TestBuildImageStudioMultipartBodiesSplitsNAndKeepsFiles(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

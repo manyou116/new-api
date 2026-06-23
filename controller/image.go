@@ -384,6 +384,13 @@ type imageStudioContext struct {
 func captureImageStudioContext(c *gin.Context, taskID, requestID, contentType string, body []byte) imageStudioContext {
 	keys := make(map[string]any, len(c.Keys))
 	for k, v := range c.Keys {
+		// Image Studio snapshots replay a newly serialized request body. Do not
+		// carry the original multipart boundary into that replay context, or the
+		// parser may scan binary payload bytes with the wrong boundary and fail
+		// with: multipart: NextPart: bufio: buffer full.
+		if k == common.KeyOriginalMultipartContentType {
+			continue
+		}
 		keys[k] = v
 	}
 	return imageStudioContext{
