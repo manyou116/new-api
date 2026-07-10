@@ -261,6 +261,7 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
+	groupSubscriptionState := inspectGroupSubscriptionMigrationState()
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -312,10 +313,11 @@ func migrateDB() error {
 			return err
 		}
 	}
-	return nil
+	return migrateGroupSubscriptionSnapshots(groupSubscriptionState)
 }
 
 func migrateDBFast() error {
+	groupSubscriptionState := inspectGroupSubscriptionMigrationState()
 
 	var wg sync.WaitGroup
 
@@ -383,6 +385,9 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := migrateGroupSubscriptionSnapshots(groupSubscriptionState); err != nil {
+		return err
 	}
 	common.SysLog("database migrated")
 	return nil
@@ -489,6 +494,102 @@ type sqliteColumnDef struct {
 	DDL  string
 }
 
+type groupSubscriptionMigrationState struct {
+	planHadWalletOverflow bool
+	planHadLegacyFallback bool
+	userHadWalletOverflow bool
+	userHadGroupScope     bool
+}
+
+func inspectGroupSubscriptionMigrationState() groupSubscriptionMigrationState {
+	state := groupSubscriptionMigrationState{}
+	if DB == nil {
+		return state
+	}
+	if DB.Migrator().HasTable(&SubscriptionPlan{}) {
+		state.planHadWalletOverflow = DB.Migrator().HasColumn(&SubscriptionPlan{}, "allow_wallet_overflow")
+		state.planHadLegacyFallback = DB.Migrator().HasColumn(&SubscriptionPlan{}, "disable_wallet_fallback")
+	}
+	if DB.Migrator().HasTable(&UserSubscription{}) {
+		state.userHadWalletOverflow = DB.Migrator().HasColumn(&UserSubscription{}, "allow_wallet_overflow")
+		state.userHadGroupScope = DB.Migrator().HasColumn(&UserSubscription{}, "allowed_token_groups")
+	}
+	return state
+}
+
+// migrateGroupSubscriptionSnapshots upgrades databases from both upstream and
+// the older fork. It runs once and uses model updates instead of dialect-specific
+// SQL so SQLite, MySQL, and PostgreSQL share the same behavior.
+func migrateGroupSubscriptionSnapshots(state groupSubscriptionMigrationState) error {
+	const markerKey = "MigrationGroupSubscriptionsV1"
+	if DB == nil || !DB.Migrator().HasTable(&Option{}) {
+		return nil
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var marker Option
+		result := tx.Where("key = ?", markerKey).Limit(1).Find(&marker)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			return nil
+		}
+
+		var plans []SubscriptionPlan
+		if err := tx.Find(&plans).Error; err != nil {
+			return err
+		}
+		planScopes := make(map[int]string, len(plans))
+		planOverflow := make(map[int]bool, len(plans))
+		for _, plan := range plans {
+			scope := NormalizeAllowedTokenGroups(plan.AllowedTokenGroups)
+			allowOverflow := true
+			if state.planHadWalletOverflow && plan.AllowWalletOverflow != nil {
+				allowOverflow = *plan.AllowWalletOverflow
+			} else if state.planHadLegacyFallback && plan.DisableWalletFallback && scope != "" {
+				// The old fork treated strict+empty as non-strict. Preserve that
+				// behavior during upgrade; new plans use the new explicit switch.
+				allowOverflow = false
+			}
+			if err := tx.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(map[string]interface{}{
+				"allowed_token_groups":    scope,
+				"allow_wallet_overflow":   allowOverflow,
+				"disable_wallet_fallback": !allowOverflow,
+			}).Error; err != nil {
+				return err
+			}
+			planScopes[plan.Id] = scope
+			planOverflow[plan.Id] = allowOverflow
+		}
+
+		if !state.userHadGroupScope || !state.userHadWalletOverflow {
+			var subscriptions []UserSubscription
+			if err := tx.Find(&subscriptions).Error; err != nil {
+				return err
+			}
+			for _, subscription := range subscriptions {
+				updates := make(map[string]interface{}, 2)
+				if !state.userHadGroupScope {
+					updates["allowed_token_groups"] = planScopes[subscription.PlanId]
+				}
+				if !state.userHadWalletOverflow {
+					allowOverflow, exists := planOverflow[subscription.PlanId]
+					if !exists {
+						allowOverflow = true
+					}
+					updates["allow_wallet_overflow"] = allowOverflow
+				}
+				if len(updates) > 0 {
+					if err := tx.Model(&UserSubscription{}).Where("id = ?", subscription.Id).Updates(updates).Error; err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return tx.Create(&Option{Key: markerKey, Value: "done"}).Error
+	})
+}
+
 func ensureSubscriptionPlanTableSQLite() error {
 	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 		return nil
@@ -508,6 +609,8 @@ func ensureSubscriptionPlanTableSQLite() error {
 ` + "`sort_order`" + ` integer DEFAULT 0,
 ` + "`allow_balance_pay`" + ` numeric DEFAULT 1,
 ` + "`allow_wallet_overflow`" + ` numeric DEFAULT 1,
+` + "`disable_wallet_fallback`" + ` numeric DEFAULT 0,
+` + "`allowed_token_groups`" + ` text DEFAULT '',
 ` + "`stripe_price_id`" + ` varchar(128) DEFAULT '',
 ` + "`creem_product_id`" + ` varchar(128) DEFAULT '',
 ` + "`waffo_pancake_product_id`" + ` varchar(128) DEFAULT '',
@@ -545,6 +648,8 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "sort_order", DDL: "`sort_order` integer DEFAULT 0"},
 		{Name: "allow_balance_pay", DDL: "`allow_balance_pay` numeric DEFAULT 1"},
 		{Name: "allow_wallet_overflow", DDL: "`allow_wallet_overflow` numeric DEFAULT 1"},
+		{Name: "disable_wallet_fallback", DDL: "`disable_wallet_fallback` numeric DEFAULT 0"},
+		{Name: "allowed_token_groups", DDL: "`allowed_token_groups` text DEFAULT ''"},
 		{Name: "stripe_price_id", DDL: "`stripe_price_id` varchar(128) DEFAULT ''"},
 		{Name: "creem_product_id", DDL: "`creem_product_id` varchar(128) DEFAULT ''"},
 		{Name: "waffo_pancake_product_id", DDL: "`waffo_pancake_product_id` varchar(128) DEFAULT ''"},

@@ -31,6 +31,7 @@ import {
   sideDrawerHeaderClassName,
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -119,7 +120,9 @@ export function SubscriptionsMutateDrawer({
       }
       getGroups()
         .then((res) => {
-          if (res.success) setGroupOptions(res.data || [])
+          if (res.success) {
+            setGroupOptions([...new Set(['auto', ...(res.data || [])])])
+          }
         })
         .catch(() => {})
       // Best-effort — empty list still lets the operator use "+ Create".
@@ -203,7 +206,10 @@ export function SubscriptionsMutateDrawer({
         typeof res.data === 'object' &&
         res.data
       ) {
-        const created = res.data as { product_id: string; product_name: string }
+        const created = res.data as {
+          product_id: string
+          product_name: string
+        }
         form.setValue('waffo_pancake_product_id', created.product_id, {
           shouldDirty: true,
         })
@@ -328,7 +334,9 @@ export function SubscriptionsMutateDrawer({
                           step='0.01'
                           min={0}
                           onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value) || 0)
+                            field.onChange(
+                              Number.parseFloat(e.target.value) || 0
+                            )
                           }
                         />
                       </FormControl>
@@ -364,7 +372,9 @@ export function SubscriptionsMutateDrawer({
                                 })
                           }
                           onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value) || 0)
+                            field.onChange(
+                              Number.parseFloat(e.target.value) || 0
+                            )
                           }
                         />
                       </FormControl>
@@ -480,7 +490,9 @@ export function SubscriptionsMutateDrawer({
                           type='number'
                           min={0}
                           onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 0)
+                            field.onChange(
+                              Number.parseInt(e.target.value, 10) || 0
+                            )
                           }
                         />
                       </FormControl>
@@ -495,6 +507,33 @@ export function SubscriptionsMutateDrawer({
 
               <FormField
                 control={form.control}
+                name='allowed_token_groups'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Subscription Token Groups')}</FormLabel>
+                    <FormControl>
+                      <MultiSelect
+                        options={groupOptions.map((group) => ({
+                          value: group,
+                          label: group,
+                        }))}
+                        selected={field.value}
+                        onChange={field.onChange}
+                        placeholder={t('All groups')}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Leave empty to allow this subscription in all token groups'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name='sort_order'
                 render={({ field }) => (
                   <FormItem>
@@ -504,7 +543,9 @@ export function SubscriptionsMutateDrawer({
                         {...field}
                         type='number'
                         onChange={(e) =>
-                          field.onChange(parseInt(e.target.value, 10) || 0)
+                          field.onChange(
+                            Number.parseInt(e.target.value, 10) || 0
+                          )
                         }
                       />
                     </FormControl>
@@ -585,12 +626,10 @@ export function SubscriptionsMutateDrawer({
                     <FormItem>
                       <FormLabel>{t('Duration Unit')}</FormLabel>
                       <Select
-                        items={[
-                          ...durationUnitOpts.map((o) => ({
-                            value: o.value,
-                            label: o.label,
-                          })),
-                        ]}
+                        items={durationUnitOpts.map((o) => ({
+                          value: o.value,
+                          label: o.label,
+                        }))}
                         onValueChange={field.onChange}
                         value={field.value}
                       >
@@ -627,7 +666,9 @@ export function SubscriptionsMutateDrawer({
                             type='number'
                             min={1}
                             onChange={(e) =>
-                              field.onChange(parseInt(e.target.value, 10) || 0)
+                              field.onChange(
+                                Number.parseInt(e.target.value, 10) || 0
+                              )
                             }
                           />
                         </FormControl>
@@ -648,7 +689,9 @@ export function SubscriptionsMutateDrawer({
                             type='number'
                             min={1}
                             onChange={(e) =>
-                              field.onChange(parseInt(e.target.value, 10) || 0)
+                              field.onChange(
+                                Number.parseInt(e.target.value, 10) || 0
+                              )
                             }
                           />
                         </FormControl>
@@ -675,12 +718,10 @@ export function SubscriptionsMutateDrawer({
                     <FormItem>
                       <FormLabel>{t('Reset Cycle')}</FormLabel>
                       <Select
-                        items={[
-                          ...resetPeriodOpts.map((o) => ({
-                            value: o.value,
-                            label: o.label,
-                          })),
-                        ]}
+                        items={resetPeriodOpts.map((o) => ({
+                          value: o.value,
+                          label: o.label,
+                        }))}
                         onValueChange={field.onChange}
                         value={field.value}
                       >
@@ -717,7 +758,9 @@ export function SubscriptionsMutateDrawer({
                           min={0}
                           disabled={resetPeriod !== 'custom'}
                           onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 0)
+                            field.onChange(
+                              Number.parseInt(e.target.value, 10) || 0
+                            )
                           }
                         />
                       </FormControl>

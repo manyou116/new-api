@@ -138,6 +138,20 @@ type AdminUpsertSubscriptionPlanRequest struct {
 	Plan model.SubscriptionPlan `json:"plan"`
 }
 
+func normalizeSubscriptionTokenGroups(value string) (string, error) {
+	normalized := model.NormalizeAllowedTokenGroups(value)
+	groupRatios := ratio_setting.GetGroupRatioCopy()
+	for _, group := range model.ParseAllowedTokenGroups(normalized) {
+		if group == "auto" {
+			continue
+		}
+		if _, exists := groupRatios[group]; !exists {
+			return "", fmt.Errorf("允许使用分组不存在: %s", group)
+		}
+	}
+	return normalized, nil
+}
+
 func AdminCreateSubscriptionPlan(c *gin.Context) {
 	if !requirePaymentCompliance(c) {
 		return
@@ -169,8 +183,15 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		req.Plan.AllowBalancePay = common.GetPointer(true)
 	}
 	if req.Plan.AllowWalletOverflow == nil {
-		req.Plan.AllowWalletOverflow = common.GetPointer(true)
+		req.Plan.AllowWalletOverflow = common.GetPointer(!req.Plan.DisableWalletFallback)
 	}
+	req.Plan.DisableWalletFallback = !*req.Plan.AllowWalletOverflow
+	allowedTokenGroups, err := normalizeSubscriptionTokenGroups(req.Plan.AllowedTokenGroups)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	req.Plan.AllowedTokenGroups = allowedTokenGroups
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -204,7 +225,7 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
 		return
 	}
-	err := model.DB.Create(&req.Plan).Error
+	err = model.DB.Create(&req.Plan).Error
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -259,6 +280,16 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
+	if req.Plan.AllowWalletOverflow == nil {
+		req.Plan.AllowWalletOverflow = common.GetPointer(!req.Plan.DisableWalletFallback)
+	}
+	req.Plan.DisableWalletFallback = !*req.Plan.AllowWalletOverflow
+	allowedTokenGroups, err := normalizeSubscriptionTokenGroups(req.Plan.AllowedTokenGroups)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	req.Plan.AllowedTokenGroups = allowedTokenGroups
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
 	if req.Plan.UpgradeGroup != "" {
 		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
@@ -279,7 +310,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 
-	err := model.DB.Transaction(func(tx *gorm.DB) error {
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		// update plan (allow zero values updates with map)
 		updateMap := map[string]interface{}{
 			"title":                      req.Plan.Title,
@@ -298,6 +329,8 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"total_amount":               req.Plan.TotalAmount,
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"downgrade_group":            req.Plan.DowngradeGroup,
+			"allowed_token_groups":       req.Plan.AllowedTokenGroups,
+			"disable_wallet_fallback":    req.Plan.DisableWalletFallback,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
 			"updated_at":                 common.GetTimestamp(),
