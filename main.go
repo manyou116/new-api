@@ -125,6 +125,12 @@ func main() {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 
+	// Image Studio stores generated assets outside the database. The optional
+	// retention policy is enforced by the master node only.
+	service.StartImageStudioLegacyAssetMigration()
+	service.StartImageStudioAssetCleanupTask()
+	service.StartImageStudioRecoveryTask()
+
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
 	service.StartSystemInstanceReporter()

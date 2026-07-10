@@ -98,6 +98,7 @@ func (m Properties) Value() (driver.Value, error) {
 
 type TaskPrivateData struct {
 	Key            string `json:"key,omitempty"`
+	RequestId      string `json:"request_id,omitempty"`
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
 	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
@@ -294,6 +295,7 @@ func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 	var tasks []*Task
 	err := DB.Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+		Where("platform <> ?", constant.TaskPlatformImageStudio).
 		Where("submit_time < ?", cutoffUnix).
 		Order("submit_time").
 		Limit(limit).
@@ -308,7 +310,12 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 	var tasks []*Task
 	var err error
 	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
+	err = DB.Where("progress != ?", "100%").
+		Where("status NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
+		Where("platform <> ?", constant.TaskPlatformImageStudio).
+		Limit(limit).
+		Order("id").
+		Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
@@ -323,8 +330,8 @@ func HasUnfinishedSyncTasks() bool {
 	var id int64
 	err := DB.Model(&Task{}).
 		Where("progress != ?", "100%").
-		Where("status != ?", TaskStatusFailure).
-		Where("status != ?", TaskStatusSuccess).
+		Where("status NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
+		Where("platform <> ?", constant.TaskPlatformImageStudio).
 		Limit(1).
 		Pluck("id", &id).Error
 	return err == nil && id != 0
@@ -415,6 +422,23 @@ func (Task *Task) Update() error {
 	var err error
 	err = DB.Save(Task).Error
 	return err
+}
+
+// UpdateBillingSnapshot persists the authoritative settlement metadata while
+// the task remains in the expected lifecycle state. It intentionally updates
+// only billing-related columns so it cannot overwrite a concurrent timeout.
+func (t *Task) UpdateBillingSnapshot(fromStatus TaskStatus) (bool, error) {
+	result := DB.Model(&Task{}).
+		Where("id = ? AND status = ?", t.ID, fromStatus).
+		Updates(map[string]any{
+			"quota":        t.Quota,
+			"channel_id":   t.ChannelId,
+			"group":        t.Group,
+			"properties":   t.Properties,
+			"private_data": t.PrivateData,
+			"updated_at":   t.UpdatedAt,
+		})
+	return result.RowsAffected > 0, result.Error
 }
 
 func (t *Task) UpdateQuota() error {
