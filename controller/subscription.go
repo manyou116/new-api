@@ -19,6 +19,26 @@ type SubscriptionPlanDTO struct {
 	Plan model.SubscriptionPlan `json:"plan"`
 }
 
+// PublicSubscriptionPlanDTO is the deliberately small, anonymous-facing plan
+// contract used by the landing page. Payment-provider identifiers and
+// administrative lifecycle fields must never be added here.
+type PublicSubscriptionPlanDTO struct {
+	Id                      int     `json:"id"`
+	Title                   string  `json:"title"`
+	Subtitle                string  `json:"subtitle"`
+	PriceAmount             float64 `json:"price_amount"`
+	Currency                string  `json:"currency"`
+	DurationUnit            string  `json:"duration_unit"`
+	DurationValue           int     `json:"duration_value"`
+	CustomSeconds           int64   `json:"custom_seconds"`
+	TotalAmount             int64   `json:"total_amount"`
+	QuotaResetPeriod        string  `json:"quota_reset_period"`
+	QuotaResetCustomSeconds int64   `json:"quota_reset_custom_seconds"`
+	UpgradeGroup            string  `json:"upgrade_group"`
+	AllowedTokenGroups      string  `json:"allowed_token_groups"`
+	AllowWalletOverflow     bool    `json:"allow_wallet_overflow"`
+}
+
 type BillingPreferenceRequest struct {
 	BillingPreference string `json:"billing_preference"`
 }
@@ -28,6 +48,41 @@ type SubscriptionBalancePayRequest struct {
 }
 
 // ---- User APIs ----
+
+func GetPublicSubscriptionPlans(c *gin.Context) {
+	if !operation_setting.IsPaymentComplianceConfirmed() {
+		common.ApiSuccess(c, []PublicSubscriptionPlanDTO{})
+		return
+	}
+
+	var plans []model.SubscriptionPlan
+	if err := model.DB.Where("enabled = ?", true).Order("sort_order desc, id desc").Find(&plans).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	result := make([]PublicSubscriptionPlanDTO, 0, len(plans))
+	for index := range plans {
+		plan := &plans[index]
+		plan.NormalizeDefaults()
+		result = append(result, PublicSubscriptionPlanDTO{
+			Id:                      plan.Id,
+			Title:                   plan.Title,
+			Subtitle:                plan.Subtitle,
+			PriceAmount:             plan.PriceAmount,
+			Currency:                plan.Currency,
+			DurationUnit:            plan.DurationUnit,
+			DurationValue:           plan.DurationValue,
+			CustomSeconds:           plan.CustomSeconds,
+			TotalAmount:             plan.TotalAmount,
+			QuotaResetPeriod:        plan.QuotaResetPeriod,
+			QuotaResetCustomSeconds: plan.QuotaResetCustomSeconds,
+			UpgradeGroup:            plan.UpgradeGroup,
+			AllowedTokenGroups:      plan.AllowedTokenGroups,
+			AllowWalletOverflow:     *plan.AllowWalletOverflow,
+		})
+	}
+	common.ApiSuccess(c, result)
+}
 
 func GetSubscriptionPlans(c *gin.Context) {
 	if !operation_setting.IsPaymentComplianceConfirmed() {
