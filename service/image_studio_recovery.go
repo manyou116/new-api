@@ -19,12 +19,16 @@ const imageStudioRecoveryInterval = time.Minute
 
 var imageStudioRecoveryOnce sync.Once
 
-// StartImageStudioRecoveryTask fails timed-out IN_PROGRESS studio jobs and
-// refunds incomplete charges. QUEUED jobs are not failed here: durable workers
-// claim them after restart.
+// StartImageStudioRecoveryTask reclaims this node's orphaned IN_PROGRESS jobs
+// once at process start, then periodically fails timed-out work and refunds.
+// QUEUED jobs are not failed here: durable workers claim them after restart.
 func StartImageStudioRecoveryTask() {
 	imageStudioRecoveryOnce.Do(func() {
 		gopool.Go(func() {
+			// Startup only: requeue/fail jobs left IN_PROGRESS by a previous
+			// process. Must not run on the periodic tick or live workers would
+			// be interrupted every minute.
+			ReclaimOrphanedImageStudioTasks(context.Background())
 			RunImageStudioRecoveryOnce(context.Background())
 			ticker := time.NewTicker(imageStudioRecoveryInterval)
 			defer ticker.Stop()
@@ -39,7 +43,6 @@ func RunImageStudioRecoveryOnce(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ReclaimOrphanedImageStudioTasks(ctx)
 	timeoutMinutes := ImageStudioTaskTimeoutMinutes()
 	cutoff := time.Now().Add(-time.Duration(timeoutMinutes) * time.Minute).Unix()
 	now := time.Now().Unix()
