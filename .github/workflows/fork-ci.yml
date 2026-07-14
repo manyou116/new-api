@@ -51,5 +51,5 @@ jobs:
           context: .
           platforms: linux/amd64
           push: false
-          cache-from: type=gha,scope=fork-ci
-          cache-to: type=gha,mode=max,scope=fork-ci
+          cache-from: type=gha,scope=fork-ci-amd64
+          cache-to: type=gha,mode=max,scope=fork-ci-amd64
