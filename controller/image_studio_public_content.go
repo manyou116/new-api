@@ -23,6 +23,12 @@ const (
 // carried by the expiring HMAC signature, so native image and CDN requests do
 // not need dashboard cookies or API headers.
 func GetPublicImageStudioAsset(c *gin.Context) {
+	// Always attach CORS/CORP headers on this handler (including errors).
+	// gin-contrib/cors only emits ACAO when Origin is present; CDN edge caches
+	// often revalidate or serve the first no-Origin response, which then breaks
+	// <img crossorigin="anonymous"> and credential-less fetch from other entry domains.
+	applyImageStudioPublicAssetHeaders(c)
+
 	assetID, assetIDErr := strconv.ParseInt(c.Param("asset_id"), 10, 64)
 	expiresAt, expiresErr := strconv.ParseInt(c.Param("expires"), 10, 64)
 	now := time.Now()
@@ -60,8 +66,6 @@ func GetPublicImageStudioAsset(c *gin.Context) {
 	edgeTTL := min(remaining, imageStudioEdgeCacheSeconds)
 	browserTTL := min(edgeTTL, imageStudioBrowserCacheSeconds)
 	c.Header("Cache-Control", fmt.Sprintf("public, max-age=%d, s-maxage=%d, must-revalidate", browserTTL, edgeTTL))
-	c.Header("Cross-Origin-Resource-Policy", "cross-origin")
-	c.Header("Referrer-Policy", "no-referrer")
 	c.Header("Content-Security-Policy", "default-src 'none'")
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Content-Type", asset.MimeType)
@@ -74,4 +78,14 @@ func GetPublicImageStudioAsset(c *gin.Context) {
 		return
 	}
 	http.ServeContent(c.Writer, c.Request, "", info.ModTime(), file)
+}
+
+// applyImageStudioPublicAssetHeaders makes signed image URLs safe to load from any
+// site entry (domestic CDN page + Cloudflare image host, etc.). Headers are
+// intentional on every response so edge caches never store a CORS-less body.
+func applyImageStudioPublicAssetHeaders(c *gin.Context) {
+	c.Header("Access-Control-Allow-Origin", "*")
+	c.Header("Access-Control-Expose-Headers", "Content-Length, Content-Range, ETag")
+	c.Header("Cross-Origin-Resource-Policy", "cross-origin")
+	c.Header("Referrer-Policy", "no-referrer")
 }
