@@ -592,7 +592,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 			}
 		}
 	}
-	allowWalletOverflow := true
+	allowWalletOverflow := strings.TrimSpace(plan.AllowedTokenGroups) == ""
 	if plan.AllowWalletOverflow != nil {
 		allowWalletOverflow = *plan.AllowWalletOverflow
 	}
@@ -920,9 +920,8 @@ func HasActiveUserSubscriptionForGroup(userId int, usingGroup string) (bool, err
 	return false, nil
 }
 
-// UserActiveSubscriptionsAllowWalletOverflow returns whether wallet balance may be used
-// after the user's subscription quota is exhausted. A single active subscription that
-// disallows wallet overflow (allow_wallet_overflow = false) blocks the fallback.
+// UserActiveSubscriptionsAllowWalletOverflow reports whether wallet billing is allowed
+// for usingGroup. Any active matching subscription with allow_wallet_overflow=false blocks it.
 func UserActiveSubscriptionsAllowWalletOverflow(userId int, usingGroup string) (bool, error) {
 	if userId <= 0 {
 		return false, errors.New("invalid userId")

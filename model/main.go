@@ -319,6 +319,9 @@ func migrateDB() error {
 	if err := migrateGroupSubscriptionSnapshots(groupSubscriptionState); err != nil {
 		return err
 	}
+	if err := migrateGroupScopedWalletLock(); err != nil {
+		return err
+	}
 	return migrateImageStudioRefundLedger()
 }
 
@@ -395,6 +398,9 @@ func migrateDBFast() error {
 		}
 	}
 	if err := migrateGroupSubscriptionSnapshots(groupSubscriptionState); err != nil {
+		return err
+	}
+	if err := migrateGroupScopedWalletLock(); err != nil {
 		return err
 	}
 	if err := migrateImageStudioRefundLedger(); err != nil {
@@ -595,6 +601,46 @@ func migrateGroupSubscriptionSnapshots(state groupSubscriptionMigrationState) er
 						return err
 					}
 				}
+			}
+		}
+		return tx.Create(&Option{Key: markerKey, Value: "done"}).Error
+	})
+}
+
+// migrateGroupScopedWalletLock defaults allow_wallet_overflow=false for historical
+// group-scoped plans/subscriptions (admin can re-enable per plan afterward).
+func migrateGroupScopedWalletLock() error {
+	const markerKey = "MigrationGroupScopedWalletLockV1"
+	if DB == nil || !DB.Migrator().HasTable(&Option{}) {
+		return nil
+	}
+	// HasTable before the transaction: avoids SQLite MaxOpenConns=1 deadlocks.
+	hasPlanTable := DB.Migrator().HasTable(&SubscriptionPlan{})
+	hasUserSubTable := DB.Migrator().HasTable(&UserSubscription{})
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var marker Option
+		result := tx.Where("key = ?", markerKey).Limit(1).Find(&marker)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			return nil
+		}
+		if hasPlanTable {
+			if err := tx.Model(&SubscriptionPlan{}).
+				Where("allowed_token_groups <> ? AND allowed_token_groups IS NOT NULL", "").
+				Updates(map[string]interface{}{
+					"allow_wallet_overflow":   false,
+					"disable_wallet_fallback": true,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		if hasUserSubTable {
+			if err := tx.Model(&UserSubscription{}).
+				Where("allowed_token_groups <> ? AND allowed_token_groups IS NOT NULL", "").
+				Update("allow_wallet_overflow", false).Error; err != nil {
+				return err
 			}
 		}
 		return tx.Create(&Option{Key: markerKey, Value: "done"}).Error

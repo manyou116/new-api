@@ -207,6 +207,22 @@ func normalizeSubscriptionTokenGroups(value string) (string, error) {
 	return normalized, nil
 }
 
+// defaultPlanWalletOverflow sets AllowWalletOverflow when omitted.
+// Group-scoped plans default to false so package ratios do not silently fall
+// onto wallet billing; unscoped plans keep the legacy disable_wallet_fallback mapping.
+func defaultPlanWalletOverflow(plan *model.SubscriptionPlan, allowedTokenGroups string) {
+	if plan.AllowWalletOverflow != nil {
+		plan.DisableWalletFallback = !*plan.AllowWalletOverflow
+		return
+	}
+	if allowedTokenGroups != "" {
+		plan.AllowWalletOverflow = common.GetPointer(false)
+	} else {
+		plan.AllowWalletOverflow = common.GetPointer(!plan.DisableWalletFallback)
+	}
+	plan.DisableWalletFallback = !*plan.AllowWalletOverflow
+}
+
 func AdminCreateSubscriptionPlan(c *gin.Context) {
 	if !requirePaymentCompliance(c) {
 		return
@@ -237,16 +253,13 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 	if req.Plan.AllowBalancePay == nil {
 		req.Plan.AllowBalancePay = common.GetPointer(true)
 	}
-	if req.Plan.AllowWalletOverflow == nil {
-		req.Plan.AllowWalletOverflow = common.GetPointer(!req.Plan.DisableWalletFallback)
-	}
-	req.Plan.DisableWalletFallback = !*req.Plan.AllowWalletOverflow
 	allowedTokenGroups, err := normalizeSubscriptionTokenGroups(req.Plan.AllowedTokenGroups)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
 	req.Plan.AllowedTokenGroups = allowedTokenGroups
+	defaultPlanWalletOverflow(&req.Plan, allowedTokenGroups)
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -335,16 +348,13 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
-	if req.Plan.AllowWalletOverflow == nil {
-		req.Plan.AllowWalletOverflow = common.GetPointer(!req.Plan.DisableWalletFallback)
-	}
-	req.Plan.DisableWalletFallback = !*req.Plan.AllowWalletOverflow
 	allowedTokenGroups, err := normalizeSubscriptionTokenGroups(req.Plan.AllowedTokenGroups)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
 	req.Plan.AllowedTokenGroups = allowedTokenGroups
+	defaultPlanWalletOverflow(&req.Plan, allowedTokenGroups)
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
 	if req.Plan.UpgradeGroup != "" {
 		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
@@ -398,6 +408,20 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		}
 		if err := tx.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Updates(updateMap).Error; err != nil {
 			return err
+		}
+		// Active subscriptions keep purchase-time snapshots; push overflow +
+		// group scope when the admin updates the plan so the switch takes effect.
+		if req.Plan.AllowWalletOverflow != nil {
+			now := common.GetTimestamp()
+			if err := tx.Model(&model.UserSubscription{}).
+				Where("plan_id = ? AND status = ? AND end_time > ?", id, "active", now).
+				Updates(map[string]interface{}{
+					"allow_wallet_overflow": *req.Plan.AllowWalletOverflow,
+					"allowed_token_groups":  req.Plan.AllowedTokenGroups,
+					"updated_at":            now,
+				}).Error; err != nil {
+				return err
+			}
 		}
 		return nil
 	})

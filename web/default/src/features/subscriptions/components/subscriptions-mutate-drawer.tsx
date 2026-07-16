@@ -147,6 +147,8 @@ export function SubscriptionsMutateDrawer({
 
   const durationUnit = form.watch('duration_unit')
   const resetPeriod = form.watch('quota_reset_period')
+  const allowedTokenGroups = form.watch('allowed_token_groups')
+  const isGroupScoped = (allowedTokenGroups?.length ?? 0) > 0
   // Gate "+ Create on Pancake" on the same checks the mint handler runs.
   const watchedTitle = form.watch('title')
   const watchedPrice = form.watch('price_amount')
@@ -605,6 +607,13 @@ export function SubscriptionsMutateDrawer({
                           onCheckedChange={field.onChange}
                         />
                       </FormControl>
+                      {isGroupScoped ? (
+                        <FormDescription>
+                          {t(
+                            'Group-scoped plans default wallet fallback off; enable only if wallet billing at the wallet group ratio is intended after package quota is used up'
+                          )}
+                        </FormDescription>
+                      ) : null}
                     </FormItem>
                   )}
                 />

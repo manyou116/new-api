@@ -235,7 +235,7 @@ func CreateImageStudioTask(c *gin.Context) {
 	}
 
 	// Wallet hold at submit so concurrent batches cannot oversell quota.
-	// subscription_only users skip hold and bill at execute time.
+	// Skip hold when billing will not use wallet (subscription_only / no wallet overflow).
 	perImageQuota := 0
 	shouldHoldWallet := true
 	if userCache != nil {
@@ -243,6 +243,14 @@ func CreateImageStudioTask(c *gin.Context) {
 		if pref == "subscription_only" {
 			shouldHoldWallet = false
 		}
+	}
+	if shouldHoldWallet {
+		allowOverflow, overflowErr := model.UserActiveSubscriptionsAllowWalletOverflow(userID, relayInfo.UsingGroup)
+		if overflowErr != nil {
+			common.ApiError(c, overflowErr)
+			return
+		}
+		shouldHoldWallet = allowOverflow
 	}
 	if shouldHoldWallet {
 		perImageQuota, _, err = estimateImageStudioPerImageQuota(c, imageRequest)

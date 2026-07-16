@@ -108,6 +108,7 @@ export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
 }
 
 export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
+  const allowWalletOverflow = Boolean(values.allow_wallet_overflow)
   return {
     plan: {
       ...values,
@@ -126,7 +127,8 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
       upgrade_group: values.upgrade_group || '',
       downgrade_group: values.downgrade_group || '',
       allowed_token_groups: values.allowed_token_groups.join(','),
-      disable_wallet_fallback: !values.allow_wallet_overflow,
+      allow_wallet_overflow: allowWalletOverflow,
+      disable_wallet_fallback: !allowWalletOverflow,
     },
   }
 }
