@@ -57,33 +57,104 @@ func notifyBillingSettlementObserver(c *gin.Context, info *relaycommon.RelayInfo
 // 会话存储在 relayInfo.Billing 上，供后续 Settle / Refund 使用。
 const imageStudioPreheldQuotaKey = "image_studio_preheld_quota"
 
-// SetImageStudioPreheldQuota tells PreConsumeBilling that the wallet hold was
-// already taken when the durable studio job was submitted. Execute must not
-// debit the wallet a second time.
-func SetImageStudioPreheldQuota(c *gin.Context, quota int) {
-	if c == nil || quota < 0 {
-		return
-	}
-	c.Set(imageStudioPreheldQuotaKey, quota)
+// ImageStudioPrehold describes a submit-time funding hold that execute must adopt.
+type ImageStudioPrehold struct {
+	Quota          int
+	Source         string
+	SubscriptionId int
+	RequestId      string
 }
 
-func imageStudioPreheldQuota(c *gin.Context) (int, bool) {
+// SetImageStudioPreheldQuota tells PreConsumeBilling that a wallet hold was
+// already taken when the durable studio job was submitted. Prefer
+// SetImageStudioPreheldBilling when the source may be subscription.
+func SetImageStudioPreheldQuota(c *gin.Context, quota int) {
+	SetImageStudioPreheldBilling(c, ImageStudioPrehold{
+		Quota:  quota,
+		Source: BillingSourceWallet,
+	})
+}
+
+// SetImageStudioPreheldBilling tells PreConsumeBilling that funding was already
+// reserved at job submit (wallet or subscription). Execute must not debit again.
+func SetImageStudioPreheldBilling(c *gin.Context, hold ImageStudioPrehold) {
+	if c == nil || hold.Quota < 0 {
+		return
+	}
+	if hold.Source == "" {
+		hold.Source = BillingSourceWallet
+	}
+	c.Set(imageStudioPreheldQuotaKey, hold)
+}
+
+func imageStudioPreheld(c *gin.Context) (ImageStudioPrehold, bool) {
 	if c == nil {
-		return 0, false
+		return ImageStudioPrehold{}, false
 	}
 	value, ok := c.Get(imageStudioPreheldQuotaKey)
 	if !ok {
-		return 0, false
+		return ImageStudioPrehold{}, false
 	}
-	held, ok := value.(int)
-	if !ok || held < 0 {
-		return 0, false
+	switch held := value.(type) {
+	case ImageStudioPrehold:
+		if held.Quota < 0 {
+			return ImageStudioPrehold{}, false
+		}
+		return held, true
+	case int:
+		// Backward-compatible with older callers/tests that stored a bare int.
+		if held < 0 {
+			return ImageStudioPrehold{}, false
+		}
+		return ImageStudioPrehold{Quota: held, Source: BillingSourceWallet}, true
+	default:
+		return ImageStudioPrehold{}, false
 	}
-	return held, true
+}
+
+// PreHoldImageStudioBilling reserves funding at job submit according to the
+// user's billing preference (subscription_first / wallet_first / ...).
+// Caller must set relayInfo.RequestId to the per-task request id first.
+func PreHoldImageStudioBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo, quota int) (ImageStudioPrehold, *types.NewAPIError) {
+	if relayInfo == nil {
+		return ImageStudioPrehold{}, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+	}
+	if quota <= 0 {
+		return ImageStudioPrehold{}, nil
+	}
+
+	prevForce := relayInfo.ForcePreConsume
+	prevPlayground := relayInfo.IsPlayground
+	relayInfo.ForcePreConsume = true
+	relayInfo.IsPlayground = true
+	defer func() {
+		relayInfo.ForcePreConsume = prevForce
+		relayInfo.IsPlayground = prevPlayground
+		relayInfo.Billing = nil
+	}()
+
+	if c != nil {
+		c.Set(forceImmediateQuotaBillingKey, true)
+	}
+
+	session, apiErr := NewBillingSession(c, relayInfo, quota)
+	if apiErr != nil {
+		return ImageStudioPrehold{}, apiErr
+	}
+	hold := ImageStudioPrehold{
+		Quota:          session.GetPreConsumedQuota(),
+		Source:         relayInfo.BillingSource,
+		SubscriptionId: relayInfo.SubscriptionId,
+		RequestId:      relayInfo.RequestId,
+	}
+	if hold.Source == "" {
+		hold.Source = BillingSourceWallet
+	}
+	return hold, nil
 }
 
 func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
-	if held, ok := imageStudioPreheldQuota(c); ok {
+	if held, ok := imageStudioPreheld(c); ok {
 		return adoptImageStudioPreheldBilling(c, relayInfo, held)
 	}
 	session, apiErr := NewBillingSession(c, relayInfo, preConsumedQuota)
@@ -95,25 +166,57 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	return nil
 }
 
-// adoptImageStudioPreheldBilling builds a wallet BillingSession whose pre-consume
-// was already applied at job submit. Settlement still adjusts to the real charge.
-func adoptImageStudioPreheldBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo, held int) *types.NewAPIError {
+// adoptImageStudioPreheldBilling builds a BillingSession whose pre-consume was
+// already applied at job submit. Settlement still adjusts to the real charge.
+func adoptImageStudioPreheldBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo, hold ImageStudioPrehold) *types.NewAPIError {
 	if relayInfo == nil {
 		return types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
+	held := hold.Quota
 	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 	}
 	relayInfo.UserQuota = userQuota
+
+	var funding FundingSource
+	source := hold.Source
+	if source == "" {
+		source = BillingSourceWallet
+	}
+	if source == BillingSourceSubscription {
+		requestId := hold.RequestId
+		if requestId == "" {
+			requestId = relayInfo.RequestId
+		}
+		subFunding := &SubscriptionFunding{
+			requestId:      requestId,
+			userId:         relayInfo.UserId,
+			modelName:      relayInfo.OriginModelName,
+			usingGroup:     relayInfo.UsingGroup,
+			amount:         int64(held),
+			subscriptionId: hold.SubscriptionId,
+			preConsumed:    int64(held),
+		}
+		if hold.SubscriptionId > 0 {
+			if planInfo, planErr := model.GetSubscriptionPlanInfoByUserSubscriptionId(hold.SubscriptionId); planErr == nil && planInfo != nil {
+				subFunding.PlanId = planInfo.PlanId
+				subFunding.PlanTitle = planInfo.PlanTitle
+			}
+		}
+		funding = subFunding
+	} else {
+		funding = &WalletFunding{userId: relayInfo.UserId, forceDB: true, consumed: held}
+	}
+
 	session := &BillingSession{
 		relayInfo:        relayInfo,
-		funding:          &WalletFunding{userId: relayInfo.UserId, forceDB: true, consumed: held},
+		funding:          funding,
 		preConsumedQuota: held,
 	}
 	session.syncRelayInfo()
 	relayInfo.Billing = session
-	relayInfo.BillingSource = BillingSourceWallet
+	relayInfo.BillingSource = source
 	notifyBillingSettlementObserver(c, relayInfo, held)
 	return nil
 }

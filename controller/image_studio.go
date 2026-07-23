@@ -234,30 +234,12 @@ func CreateImageStudioTask(c *gin.Context) {
 		return
 	}
 
-	// Wallet hold at submit so concurrent batches cannot oversell quota.
-	// Skip hold when billing will not use wallet (subscription_only / no wallet overflow).
-	perImageQuota := 0
-	shouldHoldWallet := true
-	if userCache != nil {
-		pref := common.NormalizeBillingPreference(userCache.GetSetting().BillingPreference)
-		if pref == "subscription_only" {
-			shouldHoldWallet = false
-		}
-	}
-	if shouldHoldWallet {
-		allowOverflow, overflowErr := model.UserActiveSubscriptionsAllowWalletOverflow(userID, relayInfo.UsingGroup)
-		if overflowErr != nil {
-			common.ApiError(c, overflowErr)
-			return
-		}
-		shouldHoldWallet = allowOverflow
-	}
-	if shouldHoldWallet {
-		perImageQuota, _, err = estimateImageStudioPerImageQuota(c, imageRequest)
-		if err != nil {
-			common.ApiErrorMsg(c, err.Error())
-			return
-		}
+	// Funding hold at submit so concurrent batches cannot oversell quota/subscription.
+	// Uses the same billing preference path as normal relay (subscription_first, etc.).
+	perImageQuota, _, err := estimateImageStudioPerImageQuota(c, imageRequest)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
 	}
 
 	batchID := ""
@@ -278,7 +260,7 @@ func CreateImageStudioTask(c *gin.Context) {
 	inserted := make([]*model.Task, 0, len(taskBodies))
 	stagedKeys := make([]string, 0, len(taskBodies))
 	defer func() {
-		// Roll back staged bodies and wallet holds if we fail before commit.
+		// Roll back staged bodies and funding holds if we fail before commit.
 		if len(taskDTOs) == len(taskBodies) {
 			return
 		}
@@ -304,18 +286,19 @@ func CreateImageStudioTask(c *gin.Context) {
 		task.PrivateData.RequestId = childRequestID
 		task.PrivateData.NodeName = common.NodeName
 		task.PrivateData.TokenId = 0
-		if shouldHoldWallet && perImageQuota > 0 {
-			if holdErr := model.DecreaseUserQuotaIfEnough(userID, perImageQuota); holdErr != nil {
-				if errors.Is(holdErr, model.ErrInsufficientUserQuota) {
-					common.ApiErrorMsg(c, fmt.Sprintf("余额不足，生成 %d 张约需 %s", imageCount, logger.FormatQuota(estimateImageStudioBatchQuota(perImageQuota, imageCount))))
-					return
-				}
-				common.ApiError(c, holdErr)
+		if perImageQuota > 0 {
+			relayInfo.RequestId = childRequestID
+			hold, holdErr := service.PreHoldImageStudioBilling(c, relayInfo, perImageQuota)
+			if holdErr != nil {
+				common.ApiErrorMsg(c, holdErr.Error())
 				return
 			}
-			task.Quota = perImageQuota
-			task.PrivateData.StudioHeldQuota = perImageQuota
-			task.PrivateData.BillingSource = service.BillingSourceWallet
+			if hold.Quota > 0 {
+				task.Quota = hold.Quota
+				task.PrivateData.StudioHeldQuota = hold.Quota
+				task.PrivateData.BillingSource = hold.Source
+				task.PrivateData.SubscriptionId = hold.SubscriptionId
+			}
 		}
 		task.SetData(imageStudioTaskPayload{Request: imageStudioRequestMeta{
 			Model:      imageRequest.Model,
@@ -429,7 +412,12 @@ func runImageStudioClaimedTask(task *model.Task) {
 	})
 	service.SetDurableAsyncBilling(c)
 	if task.PrivateData.StudioHeldQuota > 0 {
-		service.SetImageStudioPreheldQuota(c, task.PrivateData.StudioHeldQuota)
+		service.SetImageStudioPreheldBilling(c, service.ImageStudioPrehold{
+			Quota:          task.PrivateData.StudioHeldQuota,
+			Source:         task.PrivateData.BillingSource,
+			SubscriptionId: task.PrivateData.SubscriptionId,
+			RequestId:      task.PrivateData.RequestId,
+		})
 	}
 	c.Set(string(constant.ContextKeyImageStudioStrictB64), true)
 
@@ -617,13 +605,24 @@ func persistImageStudioBillingSnapshot(task *model.Task, info *relaycommon.Relay
 	}
 }
 
-// releaseImageStudioUncommittedHold returns a submit-time wallet hold that
+// releaseImageStudioUncommittedHold returns a submit-time funding hold that
 // never became a durable task row (stage/insert failed before Insert).
 func releaseImageStudioUncommittedHold(userID int, task *model.Task) {
 	if task == nil || task.PrivateData.StudioHeldQuota <= 0 {
 		return
 	}
 	held := task.PrivateData.StudioHeldQuota
+	if task.PrivateData.BillingSource == service.BillingSourceSubscription {
+		requestID := strings.TrimSpace(task.PrivateData.RequestId)
+		if requestID == "" {
+			logger.LogError(context.Background(), fmt.Sprintf("release uncommitted image studio subscription hold user=%d quota=%d: missing request id", userID, held))
+			return
+		}
+		if err := model.RefundSubscriptionPreConsume(requestID); err != nil {
+			logger.LogError(context.Background(), fmt.Sprintf("release uncommitted image studio subscription hold user=%d quota=%d: %s", userID, held, err.Error()))
+		}
+		return
+	}
 	if err := model.IncreaseUserQuota(userID, held, true); err != nil {
 		logger.LogError(context.Background(), fmt.Sprintf("release uncommitted image studio hold user=%d quota=%d: %s", userID, held, err.Error()))
 	}
