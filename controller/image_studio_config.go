@@ -147,6 +147,13 @@ func getImageStudioSizePresets() ([]imageStudioSizePreset, error) {
 	return parseImageStudioSizePresets(constant.ImageStudioDefaultSizePresets)
 }
 
+func imageStudioDownloadAllEnabled() bool {
+	common.OptionMapRWMutex.RLock()
+	raw := common.OptionMap["ImageStudioDownloadAllEnabled"]
+	common.OptionMapRWMutex.RUnlock()
+	return strings.EqualFold(strings.TrimSpace(raw), "true")
+}
+
 func GetImageStudioConfig(c *gin.Context) {
 	common.OptionMapRWMutex.RLock()
 	raw := common.OptionMap["ImageStudioPromptPresets"]
@@ -177,5 +184,6 @@ func GetImageStudioConfig(c *gin.Context) {
 		"retention_days":          service.ImageStudioRetentionDays(),
 		"interactive_batch_limit": constant.ImageStudioInteractiveBatchLimit,
 		"max_batch_size":          constant.ImageStudioMaxBatchSize,
+		"download_all_enabled":    imageStudioDownloadAllEnabled(),
 	})
 }

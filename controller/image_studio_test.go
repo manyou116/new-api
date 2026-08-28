@@ -254,9 +254,11 @@ func TestGetImageStudioConfigFallsBackToDefaultPresets(t *testing.T) {
 	previous, existed := common.OptionMap["ImageStudioPromptPresets"]
 	previousSizes, sizesExisted := common.OptionMap["ImageStudioSizePresets"]
 	previousRetention, retentionExisted := common.OptionMap["ImageStudioRetentionDays"]
+	previousDownloadAll, downloadAllExisted := common.OptionMap["ImageStudioDownloadAllEnabled"]
 	common.OptionMap["ImageStudioPromptPresets"] = "invalid"
 	common.OptionMap["ImageStudioSizePresets"] = "invalid"
 	common.OptionMap["ImageStudioRetentionDays"] = "30"
+	common.OptionMap["ImageStudioDownloadAllEnabled"] = "true"
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
 		common.OptionMapRWMutex.Lock()
@@ -275,6 +277,11 @@ func TestGetImageStudioConfigFallsBackToDefaultPresets(t *testing.T) {
 		} else {
 			delete(common.OptionMap, "ImageStudioSizePresets")
 		}
+		if downloadAllExisted {
+			common.OptionMap["ImageStudioDownloadAllEnabled"] = previousDownloadAll
+		} else {
+			delete(common.OptionMap, "ImageStudioDownloadAllEnabled")
+		}
 		common.OptionMapRWMutex.Unlock()
 	})
 
@@ -286,9 +293,10 @@ func TestGetImageStudioConfigFallsBackToDefaultPresets(t *testing.T) {
 	var response struct {
 		Success bool `json:"success"`
 		Data    struct {
-			PromptPresets []imageStudioPromptPreset `json:"prompt_presets"`
-			SizePresets   []imageStudioSizePreset   `json:"size_presets"`
-			RetentionDays int                       `json:"retention_days"`
+			PromptPresets      []imageStudioPromptPreset `json:"prompt_presets"`
+			SizePresets        []imageStudioSizePreset   `json:"size_presets"`
+			RetentionDays      int                       `json:"retention_days"`
+			DownloadAllEnabled bool                      `json:"download_all_enabled"`
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
@@ -297,6 +305,7 @@ func TestGetImageStudioConfigFallsBackToDefaultPresets(t *testing.T) {
 	assert.Len(t, response.Data.SizePresets, 14)
 	assert.Equal(t, "cpr-first-aid-guide", response.Data.PromptPresets[0].ID)
 	assert.Equal(t, 30, response.Data.RetentionDays)
+	assert.True(t, response.Data.DownloadAllEnabled)
 }
 
 func TestEstimateImageStudioBatchQuotaMatchesPerTaskRounding(t *testing.T) {

@@ -51,8 +51,9 @@ import {
   deleteImageBatch,
   deleteImageLibrary,
   deleteImageTasks,
-  downloadImageBatch,
-  downloadImageLibrary,
+  downloadImageBatchAll,
+  downloadImageLibraryAll,
+  downloadImageTasks,
   fetchImageBatchTasks,
   fetchImageBatches,
   fetchImageLibraryTasks,
@@ -66,11 +67,9 @@ import { StudioForm } from './components/studio-form'
 import { TaskGallery } from './components/task-gallery'
 import { imageStudioModeForFiles } from './reference-files'
 import type {
-  ImageStudioBatchSummary,
   ImageStudioDraft,
   ImageStudioFormValues,
   ImageStudioImage,
-  ImageStudioLibrarySummary,
   ImageStudioTaskFilter,
   NormalizedImageStudioTask,
 } from './types'
@@ -462,30 +461,44 @@ export function ImageStudio() {
     onError: (error) => toast.error(errorMessage(error)),
   })
 
-  const libraryDownloadMutation = useMutation({
-    mutationFn: async (summary: ImageStudioLibrarySummary) => ({
-      archive: await downloadImageLibrary(),
-      summary,
+  const pageDownloadMutation = useMutation({
+    mutationFn: async ({
+      taskIDs,
+      filename,
+    }: {
+      taskIDs: string[]
+      filename: string
+    }) => ({
+      archive: await downloadImageTasks(taskIDs),
+      filename,
+      count: taskIDs.length,
     }),
-    onSuccess: ({ archive, summary }) => {
-      saveArchive(archive, 'ai-studio-all.zip')
-      toast.success(
-        t('Downloaded {{count}} images.', { count: summary.success_count })
-      )
+    onSuccess: ({ archive, filename, count }) => {
+      saveArchive(archive, filename)
+      toast.success(t('Downloaded {{count}} images.', { count }))
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
 
-  const batchDownloadMutation = useMutation({
-    mutationFn: async (batch: ImageStudioBatchSummary) => ({
-      archive: await downloadImageBatch(batch.batch_id),
-      batch,
+  const allDownloadMutation = useMutation({
+    mutationFn: async ({
+      batchID,
+      filename,
+      count,
+    }: {
+      batchID?: string
+      filename: string
+      count: number
+    }) => ({
+      archive: batchID
+        ? await downloadImageBatchAll(batchID)
+        : await downloadImageLibraryAll(),
+      filename,
+      count,
     }),
-    onSuccess: ({ archive, batch }) => {
-      saveArchive(archive, `ai-studio-${batch.batch_id}.zip`)
-      toast.success(
-        t('Downloaded {{count}} images.', { count: batch.success_count })
-      )
+    onSuccess: ({ archive, filename, count }) => {
+      saveArchive(archive, filename)
+      toast.success(t('Downloaded {{count}} images.', { count }))
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -720,8 +733,7 @@ export function ImageStudio() {
                 : libraryTasksQuery.isFetching
             }
             isDownloading={
-              batchDownloadMutation.isPending ||
-              libraryDownloadMutation.isPending
+              pageDownloadMutation.isPending || allDownloadMutation.isPending
             }
             isClearing={
               batchDeleteMutation.isPending ||
@@ -744,15 +756,49 @@ export function ImageStudio() {
             onDownload={(task, image, index) =>
               downloadImage(task, image, index)
             }
-            onDownloadScope={() => {
-              if (selectedBatch) {
-                if (!batchDownloadMutation.isPending) {
-                  batchDownloadMutation.mutate(selectedBatch)
-                }
+            downloadAllEnabled={
+              studioConfigQuery.data?.download_all_enabled ?? false
+            }
+            onDownloadPage={() => {
+              if (
+                pageDownloadMutation.isPending ||
+                allDownloadMutation.isPending
+              ) {
                 return
               }
-              if (librarySummary && !libraryDownloadMutation.isPending) {
-                libraryDownloadMutation.mutate(librarySummary)
+              const taskIDs = tasks
+                .filter(
+                  (task) =>
+                    task.status === 'SUCCESS' && Boolean(task.images[0]?.url)
+                )
+                .map((task) => task.task_id)
+              if (taskIDs.length === 0) return
+              const scope = selectedBatch ? selectedBatch.batch_id : 'all'
+              pageDownloadMutation.mutate({
+                taskIDs,
+                filename: `ai-studio-${scope}-page-${taskPage}.zip`,
+              })
+            }}
+            onDownloadAll={() => {
+              if (
+                pageDownloadMutation.isPending ||
+                allDownloadMutation.isPending
+              ) {
+                return
+              }
+              if (selectedBatch) {
+                allDownloadMutation.mutate({
+                  batchID: selectedBatch.batch_id,
+                  filename: `ai-studio-${selectedBatch.batch_id}.zip`,
+                  count: selectedBatch.success_count,
+                })
+                return
+              }
+              if (librarySummary) {
+                allDownloadMutation.mutate({
+                  filename: 'ai-studio-all.zip',
+                  count: librarySummary.success_count,
+                })
               }
             }}
             onFilterChange={(filter) => {

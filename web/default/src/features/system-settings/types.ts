@@ -181,6 +181,7 @@ export type ContentSettings = {
   Chats: string
   DrawingEnabled: boolean
   ImageStudioBatchConcurrency: number
+  ImageStudioDownloadAllEnabled: boolean
   ImageStudioTaskTimeoutMinutes: number
   ImageStudioRetentionDays: number
   ImageStudioBaseURL: string

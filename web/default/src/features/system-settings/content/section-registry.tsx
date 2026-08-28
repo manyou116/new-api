@@ -108,6 +108,7 @@ const CONTENT_SECTIONS = [
         defaultValues={{
           DrawingEnabled: settings.DrawingEnabled,
           ImageStudioBatchConcurrency: settings.ImageStudioBatchConcurrency,
+          ImageStudioDownloadAllEnabled: settings.ImageStudioDownloadAllEnabled,
           ImageStudioTaskTimeoutMinutes: settings.ImageStudioTaskTimeoutMinutes,
           ImageStudioRetentionDays: settings.ImageStudioRetentionDays,
           ImageStudioBaseURL: settings.ImageStudioBaseURL,

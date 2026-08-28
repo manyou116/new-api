@@ -39,6 +39,7 @@ const defaultContentSettings: ContentSettings = {
   Chats: '[]',
   DrawingEnabled: false,
   ImageStudioBatchConcurrency: 10,
+  ImageStudioDownloadAllEnabled: false,
   ImageStudioTaskTimeoutMinutes: 10,
   ImageStudioRetentionDays: 0,
   ImageStudioBaseURL: '',

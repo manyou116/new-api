@@ -53,6 +53,7 @@ func InitOptionMap() {
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
 	common.OptionMap["ImageStudioBatchConcurrency"] = strconv.Itoa(constant.ImageStudioDefaultBatchConcurrency)
+	common.OptionMap["ImageStudioDownloadAllEnabled"] = "false"
 	legacyImageStudioTimeout := common.GetEnvOrDefault("IMAGE_STUDIO_TASK_TIMEOUT_MINUTES", constant.ImageStudioDefaultTimeoutMinutes)
 	if legacyImageStudioTimeout < constant.ImageStudioMinTimeoutMinutes || legacyImageStudioTimeout > constant.ImageStudioMaxTimeoutMinutes {
 		legacyImageStudioTimeout = constant.ImageStudioDefaultTimeoutMinutes

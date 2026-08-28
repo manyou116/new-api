@@ -122,6 +122,7 @@ export async function fetchImageStudioConfig(): Promise<ImageStudioConfig> {
     retention_days: res.data.data?.retention_days ?? 0,
     interactive_batch_limit: res.data.data?.interactive_batch_limit ?? 10,
     max_batch_size: res.data.data?.max_batch_size ?? 1000,
+    download_all_enabled: res.data.data?.download_all_enabled ?? false,
   }
 }
 
@@ -298,13 +299,37 @@ export async function deleteFailedImageLibraryTasks(): Promise<void> {
   assertSuccess(res.data)
 }
 
-export async function downloadImageLibrary(): Promise<Blob> {
+export async function downloadImageTasks(taskIDs: string[]): Promise<Blob> {
+  const res = await api.get<Blob>('/api/task/image-studio/download', {
+    ...requestConfig,
+    disableDuplicate: true,
+    params: { task_ids: taskIDs.join(',') },
+    responseType: 'blob',
+    timeout: 0,
+  })
+  return res.data
+}
+
+export async function downloadImageLibraryAll(): Promise<Blob> {
   const res = await api.get<Blob>('/api/image-studio/library/download', {
     ...requestConfig,
     disableDuplicate: true,
     responseType: 'blob',
     timeout: 0,
   })
+  return res.data
+}
+
+export async function downloadImageBatchAll(batchID: string): Promise<Blob> {
+  const res = await api.get<Blob>(
+    `/api/image-studio/batches/${encodeURIComponent(batchID)}/download`,
+    {
+      ...requestConfig,
+      disableDuplicate: true,
+      responseType: 'blob',
+      timeout: 0,
+    }
+  )
   return res.data
 }
 
@@ -324,17 +349,4 @@ export async function deleteFailedImageBatchTasks(
     requestConfig
   )
   assertSuccess(res.data)
-}
-
-export async function downloadImageBatch(batchID: string): Promise<Blob> {
-  const res = await api.get<Blob>(
-    `/api/image-studio/batches/${encodeURIComponent(batchID)}/download`,
-    {
-      ...requestConfig,
-      disableDuplicate: true,
-      responseType: 'blob',
-      timeout: 0,
-    }
-  )
-  return res.data
 }

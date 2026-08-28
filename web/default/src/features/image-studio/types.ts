@@ -110,6 +110,7 @@ export type ImageStudioConfig = {
   retention_days: number
   interactive_batch_limit: number
   max_batch_size: number
+  download_all_enabled: boolean
 }
 
 export type ImageStudioLibrarySummary = {

@@ -146,12 +146,15 @@ func DeleteImageStudioBatch(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"deleted": deleted})
 }
 
-// DownloadImageStudioBatch streams every currently-ready image in a batch.
-// Unlike the legacy 30-task endpoint it does not open every source up front:
-// at most one image file is open while each ZIP entry is copied, so 1000-image
-// batches do not consume 1000 file descriptors. Failed tasks are represented in
-// failures.csv and successful images are still downloadable.
+// DownloadImageStudioBatch streams every currently-ready image in a batch when
+// whole-scope downloads are enabled. It opens at most one image file while each
+// ZIP entry is copied, so large batches do not consume one file descriptor per
+// image. Failed tasks are represented in failures.csv.
 func DownloadImageStudioBatch(c *gin.Context) {
+	if !imageStudioDownloadAllEnabled() {
+		imageStudioContentError(c, http.StatusForbidden, "image studio download-all is disabled")
+		return
+	}
 	userID := c.GetInt("id")
 	batchID := strings.TrimSpace(c.Param("batch_id"))
 	batch, exists, err := model.GetImageStudioBatch(userID, batchID)

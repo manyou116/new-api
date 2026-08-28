@@ -20,10 +20,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// The default Studio page loads at most 30 tasks. Keeping the archive boundary
-// aligned with that page makes "Download all" truthful without unbounded file
-// descriptor usage while the ZIP sources are validated before streaming.
-const maxImageStudioBatchDownloadTasks = 30
+// Studio task pages contain at most 60 results. Keep the archive boundary
+// aligned with one page so the default bulk download cannot accidentally turn
+// into an unbounded whole-library export.
+const maxImageStudioPageDownloadTasks = 60
 
 func sanitizeImageStudioTaskDtoWithAssets(task *model.Task, taskDto *dto.TaskDto, assets []*model.ImageStudioAsset) {
 	if task == nil || taskDto == nil || task.Platform != imageStudioTaskPlatform || len(taskDto.Data) == 0 {
@@ -235,8 +235,8 @@ func DownloadImageStudioTaskImages(c *gin.Context) {
 		seen[taskID] = struct{}{}
 		taskIDs = append(taskIDs, taskID)
 	}
-	if len(taskIDs) == 0 || len(taskIDs) > maxImageStudioBatchDownloadTasks {
-		imageStudioContentError(c, http.StatusBadRequest, "task_ids must contain between 1 and 30 tasks")
+	if len(taskIDs) == 0 || len(taskIDs) > maxImageStudioPageDownloadTasks {
+		imageStudioContentError(c, http.StatusBadRequest, "task_ids must contain between 1 and 60 tasks")
 		return
 	}
 

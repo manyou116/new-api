@@ -103,7 +103,9 @@ type TaskGalleryProps = {
     image: ImageStudioImage,
     index: number
   ) => void
-  onDownloadScope?: () => void
+  downloadAllEnabled: boolean
+  onDownloadPage: () => void
+  onDownloadAll: () => void
   onFilterChange: (filter: ImageStudioTaskFilter) => void
   onPageChange: (page: number) => void
   onClearAll: () => void
@@ -205,6 +207,10 @@ export function TaskGallery(props: TaskGalleryProps) {
     ? scopeSummary.total_count > 0 &&
       scopeSummary.finished_count === scopeSummary.total_count
     : clearableTasks.length > 0
+  const pageDownloadCount = props.tasks.filter(
+    (task) => task.status === 'SUCCESS' && Boolean(task.images[0]?.url)
+  ).length
+  const pageDownloadReady = pageDownloadCount > 0
   const scopeDownloadReady = (scopeSummary?.success_count ?? 0) > 0
   const failureCount =
     scopeSummary?.failure_count ??
@@ -475,26 +481,6 @@ export function TaskGallery(props: TaskGalleryProps) {
               </div>
             ) : null}
           </CardContent>
-          <CardFooter className='justify-end'>
-            <Button
-              size='sm'
-              disabled={
-                !scopeDownloadReady || props.isDownloading || props.isClearing
-              }
-              onClick={props.onDownloadScope}
-            >
-              {props.isDownloading ? (
-                <Spinner data-icon='inline-start' />
-              ) : (
-                <HugeiconsIcon
-                  icon={Download01Icon}
-                  strokeWidth={2}
-                  data-icon='inline-start'
-                />
-              )}
-              {t('Download all')} ({scopeSummary?.success_count ?? 0})
-            </Button>
-          </CardFooter>
         </Card>
       ) : null}
 
@@ -527,12 +513,11 @@ export function TaskGallery(props: TaskGalleryProps) {
         </div>
         <div className='flex flex-wrap gap-2'>
           <Button
-            variant='outline'
             size='sm'
             disabled={
-              !scopeDownloadReady || props.isDownloading || props.isClearing
+              !pageDownloadReady || props.isDownloading || props.isClearing
             }
-            onClick={props.onDownloadScope}
+            onClick={props.onDownloadPage}
           >
             {props.isDownloading ? (
               <Spinner data-icon='inline-start' />
@@ -543,8 +528,29 @@ export function TaskGallery(props: TaskGalleryProps) {
                 data-icon='inline-start'
               />
             )}
-            {t('Download all')} ({scopeSummary?.success_count ?? 0})
+            {t('Download current page')} ({pageDownloadCount})
           </Button>
+          {props.downloadAllEnabled ? (
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={
+                !scopeDownloadReady || props.isDownloading || props.isClearing
+              }
+              onClick={props.onDownloadAll}
+            >
+              {props.isDownloading ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <HugeiconsIcon
+                  icon={Download01Icon}
+                  strokeWidth={2}
+                  data-icon='inline-start'
+                />
+              )}
+              {t('Download all')} ({scopeSummary?.success_count ?? 0})
+            </Button>
+          ) : null}
           {props.filter === 'failed' ? (
             <Button
               variant='outline'

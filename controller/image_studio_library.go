@@ -72,6 +72,10 @@ func ListImageStudioLibraryTasks(c *gin.Context) {
 // before the next one is opened, so library size does not translate into an
 // equal number of open files or task rows kept in memory.
 func DownloadImageStudioLibrary(c *gin.Context) {
+	if !imageStudioDownloadAllEnabled() {
+		imageStudioContentError(c, http.StatusForbidden, "image studio download-all is disabled")
+		return
+	}
 	userID := c.GetInt("id")
 	if err := service.EnsureUserImageStudioBatches(userID); err != nil {
 		common.ApiError(c, err)

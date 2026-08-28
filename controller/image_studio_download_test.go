@@ -13,12 +13,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func setImageStudioDownloadAllForTest(t *testing.T, enabled bool) {
+	t.Helper()
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previous, existed := common.OptionMap["ImageStudioDownloadAllEnabled"]
+	common.OptionMap["ImageStudioDownloadAllEnabled"] = fmt.Sprintf("%t", enabled)
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		if existed {
+			common.OptionMap["ImageStudioDownloadAllEnabled"] = previous
+		} else {
+			delete(common.OptionMap, "ImageStudioDownloadAllEnabled")
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
+}
 
 func createDownloadableImageStudioTask(t *testing.T, userID int, taskID string, pixel color.RGBA) []byte {
 	t.Helper()
@@ -68,12 +89,35 @@ func TestDownloadImageStudioTaskImagesStreamsOwnedBatchAsZip(t *testing.T) {
 	}
 }
 
-func TestDownloadImageStudioBatchStreamsMoreThanLegacyThirtyTaskLimit(t *testing.T) {
+func TestDownloadImageStudioDownloadAllEndpointsAreDisabledByDefault(t *testing.T) {
+	setImageStudioDownloadAllForTest(t, false)
+
+	for _, test := range []struct {
+		name string
+		run  func(*gin.Context)
+		url  string
+	}{
+		{name: "library", run: DownloadImageStudioLibrary, url: "/api/image-studio/library/download"},
+		{name: "batch", run: DownloadImageStudioBatch, url: "/api/image-studio/batches/batch-disabled/download"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodGet, test.url, nil)
+			context.Set("id", 1)
+			test.run(context)
+			assert.Equal(t, http.StatusForbidden, recorder.Code)
+		})
+	}
+}
+
+func TestDownloadImageStudioBatchStreamsMoreThanOnePageLimit(t *testing.T) {
 	setupImageStudioAssetDB(t)
+	setImageStudioDownloadAllForTest(t, true)
 	t.Setenv("IMAGE_STUDIO_STORAGE_PATH", t.TempDir())
 	batch := &model.ImageStudioBatch{
 		BatchID: "batch-large-download", UserID: 21, Mode: "generation", Group: "default",
-		Model: "gpt-image-1", Prompt: "bulk", TotalCount: maxImageStudioBatchDownloadTasks + 1,
+		Model: "gpt-image-1", Prompt: "bulk", TotalCount: maxImageStudioPageDownloadTasks + 1,
 		Priority: 10, Status: model.ImageStudioBatchStatusCompleted,
 		BodyKey: ".jobs/batch-large-download", RelayPath: "/v1/images/generations",
 	}
@@ -99,14 +143,15 @@ func TestDownloadImageStudioBatchStreamsMoreThanLegacyThirtyTaskLimit(t *testing
 	require.Equal(t, http.StatusOK, recorder.Code)
 	reader, err := zip.NewReader(bytes.NewReader(recorder.Body.Bytes()), int64(recorder.Body.Len()))
 	require.NoError(t, err)
-	// 31 images + manifest.json. This proves the new batch endpoint is not
-	// constrained by the legacy 30-task download cap.
+	// More than one 60-item page + manifest.json. This proves the opt-in
+	// download-all endpoint is not constrained by the current-page ZIP cap.
 	require.Len(t, reader.File, batch.TotalCount+1)
 	assert.Equal(t, "manifest.json", reader.File[len(reader.File)-1].Name)
 }
 
 func TestDownloadImageStudioLibraryStreamsAcrossChunks(t *testing.T) {
 	setupImageStudioAssetDB(t)
+	setImageStudioDownloadAllForTest(t, true)
 	t.Setenv("IMAGE_STUDIO_STORAGE_PATH", t.TempDir())
 	const total = 205
 	for index := 0; index < total; index++ {
@@ -149,7 +194,7 @@ func TestDownloadImageStudioTaskImagesRejectsUnownedTaskBeforeStreaming(t *testi
 func TestDownloadImageStudioTaskImagesRejectsMoreThanOnePage(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
-	taskIDs := make([]string, maxImageStudioBatchDownloadTasks+1)
+	taskIDs := make([]string, maxImageStudioPageDownloadTasks+1)
 	for index := range taskIDs {
 		taskIDs[index] = fmt.Sprintf("zip-task-%d", index)
 	}

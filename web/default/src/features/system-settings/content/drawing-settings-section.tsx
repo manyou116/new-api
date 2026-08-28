@@ -52,6 +52,7 @@ const createDrawingSchema = (t: (key: string) => string) =>
   z.object({
     DrawingEnabled: z.boolean(),
     ImageStudioBatchConcurrency: z.number().int().min(1).max(10),
+    ImageStudioDownloadAllEnabled: z.boolean(),
     ImageStudioTaskTimeoutMinutes: z.number().int().min(1).max(120),
     ImageStudioRetentionDays: z.number().int().min(0).max(3650),
     ImageStudioBaseURL: z
@@ -151,6 +152,7 @@ type DrawingFormValues = z.infer<ReturnType<typeof createDrawingSchema>>
 type DrawingSwitchName = Exclude<
   keyof DrawingFormValues,
   | 'ImageStudioBatchConcurrency'
+  | 'ImageStudioDownloadAllEnabled'
   | 'ImageStudioTaskTimeoutMinutes'
   | 'ImageStudioRetentionDays'
   | 'ImageStudioBaseURL'
@@ -277,6 +279,31 @@ export function DrawingSettingsSection({
                 )}
               </p>
             </div>
+            <FormField
+              control={form.control}
+              name='ImageStudioDownloadAllEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>
+                      {t('Allow downloading all Studio images')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'When enabled, users can download every successful image in the current library or batch as one ZIP. Keep this disabled to limit bandwidth and server load.'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </SettingsSwitchItem>
+              )}
+            />
             <FormField
               control={form.control}
               name='ImageStudioBatchConcurrency'
