@@ -94,6 +94,7 @@ func DownloadImageStudioLibrary(c *gin.Context) {
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", `attachment; filename="ai-studio-all.zip"`)
 	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Accel-Buffering", "no")
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Status(http.StatusOK)
 	archive := zip.NewWriter(c.Writer)

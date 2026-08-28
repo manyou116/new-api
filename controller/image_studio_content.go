@@ -313,6 +313,7 @@ func DownloadImageStudioTaskImages(c *gin.Context) {
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", `attachment; filename="ai-studio-images.zip"`)
 	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Accel-Buffering", "no")
 	c.Header("Content-Security-Policy", "default-src 'none'")
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Status(http.StatusOK)

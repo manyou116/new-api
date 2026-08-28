@@ -76,6 +76,7 @@ func TestDownloadImageStudioTaskImagesStreamsOwnedBatchAsZip(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "application/zip", recorder.Header().Get("Content-Type"))
+	assert.Equal(t, "no", recorder.Header().Get("X-Accel-Buffering"))
 	reader, err := zip.NewReader(bytes.NewReader(recorder.Body.Bytes()), int64(recorder.Body.Len()))
 	require.NoError(t, err)
 	require.Len(t, reader.File, 2)

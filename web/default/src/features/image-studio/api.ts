@@ -299,38 +299,17 @@ export async function deleteFailedImageLibraryTasks(): Promise<void> {
   assertSuccess(res.data)
 }
 
-export async function downloadImageTasks(taskIDs: string[]): Promise<Blob> {
-  const res = await api.get<Blob>('/api/task/image-studio/download', {
-    ...requestConfig,
-    disableDuplicate: true,
-    params: { task_ids: taskIDs.join(',') },
-    responseType: 'blob',
-    timeout: 0,
-  })
-  return res.data
+export function imageTaskDownloadURL(taskIDs: string[]): string {
+  const params = new URLSearchParams({ task_ids: taskIDs.join(',') })
+  return `/api/task/image-studio/download?${params.toString()}`
 }
 
-export async function downloadImageLibraryAll(): Promise<Blob> {
-  const res = await api.get<Blob>('/api/image-studio/library/download', {
-    ...requestConfig,
-    disableDuplicate: true,
-    responseType: 'blob',
-    timeout: 0,
-  })
-  return res.data
+export function imageLibraryDownloadURL(): string {
+  return '/api/image-studio/library/download'
 }
 
-export async function downloadImageBatchAll(batchID: string): Promise<Blob> {
-  const res = await api.get<Blob>(
-    `/api/image-studio/batches/${encodeURIComponent(batchID)}/download`,
-    {
-      ...requestConfig,
-      disableDuplicate: true,
-      responseType: 'blob',
-      timeout: 0,
-    }
-  )
-  return res.data
+export function imageBatchDownloadURL(batchID: string): string {
+  return `/api/image-studio/batches/${encodeURIComponent(batchID)}/download`
 }
 
 export async function deleteImageBatch(batchID: string): Promise<void> {

@@ -51,10 +51,10 @@ import {
   deleteImageBatch,
   deleteImageLibrary,
   deleteImageTasks,
-  downloadImageBatchAll,
-  downloadImageLibraryAll,
-  downloadImageTasks,
   fetchImageBatchTasks,
+  imageBatchDownloadURL,
+  imageLibraryDownloadURL,
+  imageTaskDownloadURL,
   fetchImageBatches,
   fetchImageLibraryTasks,
   fetchImageBlob,
@@ -92,15 +92,14 @@ type PendingDelete = {
   totalCount?: number
 }
 
-function saveArchive(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
+function startArchiveDownload(url: string, filename: string) {
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = filename
+  anchor.style.display = 'none'
   document.body.append(anchor)
   anchor.click()
   anchor.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function valuesFromTask(
@@ -468,39 +467,24 @@ export function ImageStudio() {
     }: {
       taskIDs: string[]
       filename: string
-    }) => ({
-      archive: await downloadImageTasks(taskIDs),
-      filename,
-      count: taskIDs.length,
-    }),
-    onSuccess: ({ archive, filename, count }) => {
-      saveArchive(archive, filename)
-      toast.success(t('Downloaded {{count}} images.', { count }))
+    }) => {
+      startArchiveDownload(imageTaskDownloadURL(taskIDs), filename)
     },
-    onError: (error) => toast.error(errorMessage(error)),
   })
 
   const allDownloadMutation = useMutation({
     mutationFn: async ({
       batchID,
       filename,
-      count,
     }: {
       batchID?: string
       filename: string
-      count: number
-    }) => ({
-      archive: batchID
-        ? await downloadImageBatchAll(batchID)
-        : await downloadImageLibraryAll(),
-      filename,
-      count,
-    }),
-    onSuccess: ({ archive, filename, count }) => {
-      saveArchive(archive, filename)
-      toast.success(t('Downloaded {{count}} images.', { count }))
+    }) => {
+      startArchiveDownload(
+        batchID ? imageBatchDownloadURL(batchID) : imageLibraryDownloadURL(),
+        filename
+      )
     },
-    onError: (error) => toast.error(errorMessage(error)),
   })
 
   const applyDraft = (
@@ -790,14 +774,12 @@ export function ImageStudio() {
                 allDownloadMutation.mutate({
                   batchID: selectedBatch.batch_id,
                   filename: `ai-studio-${selectedBatch.batch_id}.zip`,
-                  count: selectedBatch.success_count,
                 })
                 return
               }
               if (librarySummary) {
                 allDownloadMutation.mutate({
                   filename: 'ai-studio-all.zip',
-                  count: librarySummary.success_count,
                 })
               }
             }}

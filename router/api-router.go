@@ -16,9 +16,20 @@ import (
 func SetApiRouter(router *gin.Engine) {
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
-	// Image studio assets are already compressed binaries and must keep stable
-	// Content-Length/ETag for CDN + CORS; exclude them from response gzip.
-	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{"/api/image-studio/assets"})))
+	// Image Studio assets and ZIP exports are already-compressed binary streams.
+	// Re-gzipping them adds CPU/memory pressure and can break long downloads when
+	// they pass through Nginx/CDN buffering, so keep those paths byte-for-byte.
+	apiRouter.Use(gzip.Gzip(
+		gzip.DefaultCompression,
+		gzip.WithExcludedPaths([]string{
+			"/api/image-studio/assets",
+			"/api/image-studio/library/download",
+			"/api/task/image-studio/download",
+		}),
+		gzip.WithExcludedPathsRegexs([]string{
+			`^/api/image-studio/batches/[^/]+/download$`,
+		}),
+	))
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
 	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()
@@ -40,20 +51,23 @@ func SetApiRouter(router *gin.Engine) {
 		imageStudioLibraryRoute.Use(middleware.UserAuth())
 		{
 			imageStudioLibraryRoute.GET("/tasks", controller.ListImageStudioLibraryTasks)
-			imageStudioLibraryRoute.GET("/download", controller.DownloadImageStudioLibrary)
 			imageStudioLibraryRoute.DELETE("/failed", controller.DeleteImageStudioLibraryFailures)
 			imageStudioLibraryRoute.DELETE("", controller.DeleteImageStudioLibrary)
 		}
+		// Native browser downloads cannot attach New-Api-User, so ZIP exports use
+		// session-or-token auth and still enforce ownership inside each handler.
+		apiRouter.GET("/image-studio/library/download", middleware.TokenOrUserAuth(), controller.DownloadImageStudioLibrary)
+
 		imageStudioBatchRoute := apiRouter.Group("/image-studio/batches")
 		imageStudioBatchRoute.Use(middleware.UserAuth())
 		{
 			imageStudioBatchRoute.GET("", controller.ListImageStudioBatches)
 			imageStudioBatchRoute.GET("/:batch_id", controller.GetImageStudioBatch)
 			imageStudioBatchRoute.GET("/:batch_id/tasks", controller.ListImageStudioBatchTasks)
-			imageStudioBatchRoute.GET("/:batch_id/download", controller.DownloadImageStudioBatch)
 			imageStudioBatchRoute.DELETE("/:batch_id/failed", controller.DeleteImageStudioBatchFailures)
 			imageStudioBatchRoute.DELETE("/:batch_id", controller.DeleteImageStudioBatch)
 		}
+		apiRouter.GET("/image-studio/batches/:batch_id/download", middleware.TokenOrUserAuth(), controller.DownloadImageStudioBatch)
 		imageStudioAssetRoute := apiRouter.Group("/image-studio/assets")
 		imageStudioAssetRoute.Use(middleware.PublicAssetCORS())
 		{
