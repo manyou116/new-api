@@ -24,5 +24,5 @@ export const imageStudioFormSchema = z.object({
   prompt: z.string().trim().min(1, 'Prompt is required.'),
   size: z.string().min(1),
   quality: z.string().min(1),
-  count: z.number().int().min(1).max(10),
+  count: z.number().int().min(1).max(1000),
 })

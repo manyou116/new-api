@@ -108,6 +108,55 @@ export type ImageStudioConfig = {
   prompt_presets: ImageStudioPromptPreset[]
   size_presets: ImageStudioSizePreset[]
   retention_days: number
+  interactive_batch_limit: number
+  max_batch_size: number
+}
+
+export type ImageStudioLibrarySummary = {
+  total_count: number
+  queued_count: number
+  active_count: number
+  success_count: number
+  failure_count: number
+  finished_count: number
+}
+
+export type ImageStudioBatchSummary = {
+  batch_id: string
+  mode: string
+  group: string
+  model: string
+  prompt: string
+  size: string
+  quality: string
+  total_count: number
+  queued_count: number
+  active_count: number
+  success_count: number
+  failure_count: number
+  deleted_count: number
+  finished_count: number
+  progress: number
+  status: 'queued' | 'running' | 'completed' | 'partial_failure' | 'failed'
+  created_at: number
+  updated_at: number
+}
+
+export type ImageStudioBatchPage = {
+  items: ImageStudioBatchSummary[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type ImageStudioTaskFilter = 'all' | 'active' | 'completed' | 'failed'
+
+export type ImageStudioTaskPage = {
+  items: ImageStudioTask[]
+  total: number
+  page: number
+  page_size: number
+  summary?: ImageStudioLibrarySummary
 }
 
 export type ImageModelCatalogItem = {

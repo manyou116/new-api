@@ -90,9 +90,19 @@ func GetImageStudioAssetsByTaskIDs(taskIDs []string) ([]*ImageStudioAsset, error
 	if len(taskIDs) == 0 {
 		return nil, nil
 	}
-	var assets []*ImageStudioAsset
-	err := DB.Where("task_id IN ?", taskIDs).Order("task_id, image_index").Find(&assets).Error
-	return assets, err
+	// Keep IN lists below conservative SQLite parameter limits while allowing
+	// large Studio batches (up to 1000 children) on every supported database.
+	const chunkSize = 500
+	assets := make([]*ImageStudioAsset, 0, len(taskIDs))
+	for start := 0; start < len(taskIDs); start += chunkSize {
+		end := min(start+chunkSize, len(taskIDs))
+		var chunk []*ImageStudioAsset
+		if err := DB.Where("task_id IN ?", taskIDs[start:end]).Order("task_id, image_index").Find(&chunk).Error; err != nil {
+			return nil, err
+		}
+		assets = append(assets, chunk...)
+	}
+	return assets, nil
 }
 
 func GetImageStudioAssetsByStatus(status ImageStudioAssetStatus, limit int) ([]*ImageStudioAsset, error) {
@@ -230,21 +240,29 @@ func FinalizeImageStudioTask(task *Task) (bool, error) {
 
 func DeleteUserImageStudioTaskWithAssets(userID int, taskID string) (bool, error) {
 	deleted := false
+	taskID = strings.TrimSpace(taskID)
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		result := tx.Where(
+		var task Task
+		err := tx.Select("id").Where(
 			"user_id = ? AND task_id = ? AND platform = ? AND status IN ?",
 			userID,
-			strings.TrimSpace(taskID),
+			taskID,
 			constant.TaskPlatformImageStudio,
 			[]TaskStatus{TaskStatusSuccess, TaskStatusFailure},
-		).Delete(&Task{})
-		if result.Error != nil {
-			return result.Error
+		).First(&task).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
 		}
-		if result.RowsAffected == 0 {
-			return nil
+		if err := tx.Where("task_db_id = ?", task.ID).Delete(&ImageStudioBatchItem{}).Error; err != nil {
+			return err
 		}
-		if err := tx.Where("user_id = ? AND task_id = ?", userID, strings.TrimSpace(taskID)).Delete(&ImageStudioAsset{}).Error; err != nil {
+		if err := tx.Where("user_id = ? AND task_id = ?", userID, taskID).Delete(&ImageStudioAsset{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&Task{}, task.ID).Error; err != nil {
 			return err
 		}
 		deleted = true

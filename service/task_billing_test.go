@@ -74,6 +74,8 @@ func TestMain(m *testing.M) {
 
 	if err := db.AutoMigrate(
 		&model.Task{},
+		&model.ImageStudioBatch{},
+		&model.ImageStudioBatchItem{},
 		&model.ImageStudioAsset{},
 		&model.TaskBillingAdjustment{},
 		&model.User{},
@@ -100,6 +102,8 @@ func TestMain(m *testing.M) {
 func truncate(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
+		model.DB.Exec("DELETE FROM image_studio_batch_items")
+		model.DB.Exec("DELETE FROM image_studio_batches")
 		model.DB.Exec("DELETE FROM tasks")
 		model.DB.Exec("DELETE FROM image_studio_assets")
 		model.DB.Exec("DELETE FROM task_billing_adjustments")

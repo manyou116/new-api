@@ -45,6 +45,7 @@ func RunImageStudioRecoveryOnce(ctx context.Context) {
 	}
 	timeoutMinutes := ImageStudioTaskTimeoutMinutes()
 	cutoff := time.Now().Add(-time.Duration(timeoutMinutes) * time.Minute).Unix()
+	RecoverStaleSubmittingImageStudioBatches(ctx, cutoff)
 	now := time.Now().Unix()
 	for _, task := range model.GetTimedOutImageStudioTasks(cutoff, 100) {
 		// Only force-fail IN_PROGRESS. QUEUED work is owned by the durable worker.
@@ -65,12 +66,89 @@ func RunImageStudioRecoveryOnce(ctx context.Context) {
 		if !won {
 			continue
 		}
-		RemoveImageStudioJobBody(task.PrivateData.StudioBodyKey)
+		ReleaseImageStudioJobBodyForTask(task)
 		backfillAndRefundImageStudioTask(ctx, task)
 	}
 
 	for _, task := range model.GetUnrefundedFailedImageStudioTasks(100) {
 		backfillAndRefundImageStudioTask(ctx, task)
+	}
+}
+
+// RecoverStaleSubmittingImageStudioBatches closes the commit gate for a batch
+// that was interrupted while the HTTP submit path was still creating children.
+// A fully materialized batch is safe to activate; a partial batch is terminally
+// failed and refunded so no QUEUED child can become executable later.
+func RecoverStaleSubmittingImageStudioBatches(ctx context.Context, cutoff int64) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	batches, err := model.ListStaleSubmittingImageStudioBatches(cutoff, 20)
+	if err != nil {
+		logger.LogWarn(ctx, "image studio list stale submitting batches failed: "+err.Error())
+		return
+	}
+	for _, batch := range batches {
+		if batch == nil {
+			continue
+		}
+		tasks, err := model.ListImageStudioBatchTasksAll(batch.UserID, batch.BatchID)
+		if err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("image studio inspect submitting batch %s failed: %s", batch.BatchID, err.Error()))
+			continue
+		}
+		fullyQueued := len(tasks) == batch.TotalCount
+		if fullyQueued {
+			for _, task := range tasks {
+				if task == nil || task.Status != model.TaskStatusQueued {
+					fullyQueued = false
+					break
+				}
+			}
+		}
+		if fullyQueued {
+			if err := model.ActivateImageStudioBatch(batch.ID); err != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("image studio activate recovered batch %s failed: %s", batch.BatchID, err.Error()))
+				continue
+			}
+			logger.LogInfo(ctx, fmt.Sprintf("image studio activated fully submitted batch %s after interrupted submit", batch.BatchID))
+			continue
+		}
+
+		reason := "AI 画室批次提交中断，未完整落库，已取消并退回预占额度"
+		now := time.Now().Unix()
+		allTerminal := true
+		for _, task := range tasks {
+			if task == nil || task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+				continue
+			}
+			fromStatus := task.Status
+			task.Status = model.TaskStatusFailure
+			task.Progress = "100%"
+			task.FailReason = reason
+			task.FinishTime = now
+			task.UpdatedAt = now
+			won, updateErr := task.UpdateWithStatus(fromStatus)
+			if updateErr != nil {
+				allTerminal = false
+				logger.LogWarn(ctx, fmt.Sprintf("image studio fail partial submitting task %s failed: %s", task.TaskID, updateErr.Error()))
+				continue
+			}
+			if !won {
+				allTerminal = false
+				continue
+			}
+			backfillAndRefundImageStudioTask(ctx, task)
+		}
+		if !allTerminal {
+			continue
+		}
+		if err := model.FailSubmittingImageStudioBatch(batch.ID); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("image studio fail stale submitting batch %s failed: %s", batch.BatchID, err.Error()))
+			continue
+		}
+		RemoveImageStudioJobBody(batch.BodyKey)
+		logger.LogInfo(ctx, fmt.Sprintf("image studio failed partial batch %s after interrupted submit", batch.BatchID))
 	}
 }
 
@@ -126,7 +204,7 @@ func ReclaimOrphanedImageStudioTasks(ctx context.Context) {
 		if !won {
 			continue
 		}
-		RemoveImageStudioJobBody(bodyKey)
+		ReleaseImageStudioJobBodyForTask(task)
 		backfillAndRefundImageStudioTask(ctx, task)
 		logger.LogInfo(ctx, fmt.Sprintf("image studio failed unrecoverable orphan task %s after process restart", task.TaskID))
 	}

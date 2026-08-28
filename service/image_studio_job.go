@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/QuantumNous/new-api/model"
 )
 
 // EnsureImageStudioStorageReady verifies the studio storage root is writable.
@@ -88,4 +90,24 @@ func RemoveImageStudioJobBody(key string) {
 	}
 	_ = os.Remove(filepath.Join(root, key+".body"))
 	_ = os.Remove(filepath.Join(root, key+".meta"))
+}
+
+// ReleaseImageStudioJobBodyForTask removes a legacy per-task body immediately,
+// but keeps a shared batch body until every child task reaches a terminal state.
+func ReleaseImageStudioJobBodyForTask(task *model.Task) {
+	if task == nil {
+		return
+	}
+	batch, exists, err := model.GetImageStudioBatchForTask(task.ID)
+	if err != nil || !exists || batch == nil {
+		RemoveImageStudioJobBody(task.PrivateData.StudioBodyKey)
+		return
+	}
+	summary, err := model.RefreshImageStudioBatch(batch.ID)
+	if err != nil || summary == nil {
+		return
+	}
+	if summary.FinishedCount >= summary.TotalCount && summary.TotalCount > 0 {
+		RemoveImageStudioJobBody(batch.BodyKey)
+	}
 }

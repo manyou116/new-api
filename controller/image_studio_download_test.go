@@ -68,6 +68,69 @@ func TestDownloadImageStudioTaskImagesStreamsOwnedBatchAsZip(t *testing.T) {
 	}
 }
 
+func TestDownloadImageStudioBatchStreamsMoreThanLegacyThirtyTaskLimit(t *testing.T) {
+	setupImageStudioAssetDB(t)
+	t.Setenv("IMAGE_STUDIO_STORAGE_PATH", t.TempDir())
+	batch := &model.ImageStudioBatch{
+		BatchID: "batch-large-download", UserID: 21, Mode: "generation", Group: "default",
+		Model: "gpt-image-1", Prompt: "bulk", TotalCount: maxImageStudioBatchDownloadTasks + 1,
+		Priority: 10, Status: model.ImageStudioBatchStatusCompleted,
+		BodyKey: ".jobs/batch-large-download", RelayPath: "/v1/images/generations",
+	}
+	require.NoError(t, model.CreateImageStudioBatch(batch))
+	for index := 0; index < batch.TotalCount; index++ {
+		taskID := fmt.Sprintf("batch-large-task-%02d", index+1)
+		createDownloadableImageStudioTask(t, batch.UserID, taskID, color.RGBA{R: uint8(index), A: 255})
+		task, exists, err := model.GetByTaskId(batch.UserID, taskID)
+		require.NoError(t, err)
+		require.True(t, exists)
+		require.NoError(t, model.CreateImageStudioBatchItem(&model.ImageStudioBatchItem{
+			BatchDBID: batch.ID, TaskDBID: task.ID, BatchIndex: index + 1,
+		}))
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/image-studio/batches/batch-large-download/download", nil)
+	context.Params = gin.Params{{Key: "batch_id", Value: batch.BatchID}}
+	context.Set("id", batch.UserID)
+	DownloadImageStudioBatch(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	reader, err := zip.NewReader(bytes.NewReader(recorder.Body.Bytes()), int64(recorder.Body.Len()))
+	require.NoError(t, err)
+	// 31 images + manifest.json. This proves the new batch endpoint is not
+	// constrained by the legacy 30-task download cap.
+	require.Len(t, reader.File, batch.TotalCount+1)
+	assert.Equal(t, "manifest.json", reader.File[len(reader.File)-1].Name)
+}
+
+func TestDownloadImageStudioLibraryStreamsAcrossChunks(t *testing.T) {
+	setupImageStudioAssetDB(t)
+	t.Setenv("IMAGE_STUDIO_STORAGE_PATH", t.TempDir())
+	const total = 205
+	for index := 0; index < total; index++ {
+		createDownloadableImageStudioTask(
+			t,
+			22,
+			fmt.Sprintf("library-task-%02d", index+1),
+			color.RGBA{G: uint8(index), A: 255},
+		)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/image-studio/library/download", nil)
+	context.Set("id", 22)
+	DownloadImageStudioLibrary(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	reader, err := zip.NewReader(bytes.NewReader(recorder.Body.Bytes()), int64(recorder.Body.Len()))
+	require.NoError(t, err)
+	require.Len(t, reader.File, total+1)
+	assert.Equal(t, "manifest.json", reader.File[len(reader.File)-1].Name)
+}
+
 func TestDownloadImageStudioTaskImagesRejectsUnownedTaskBeforeStreaming(t *testing.T) {
 	setupImageStudioAssetDB(t)
 	t.Setenv("IMAGE_STUDIO_STORAGE_PATH", t.TempDir())

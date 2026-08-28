@@ -28,7 +28,7 @@ import (
 
 const (
 	imageStudioTaskPlatform = constant.TaskPlatformImageStudio
-	imageStudioMaxTaskCount = constant.ImageStudioMaxBatchConcurrency
+	imageStudioMaxTaskCount = constant.ImageStudioMaxBatchSize
 )
 
 type imageStudioTaskPayload struct {
@@ -120,12 +120,19 @@ func EstimateImageStudioCost(c *gin.Context) {
 		return
 	}
 
-	count := uint(1)
-	if imageRequest.N != nil && *imageRequest.N > 0 {
-		count = *imageRequest.N
+	bodyStorage, err := common.GetBodyStorage(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	if count > imageStudioMaxTaskCount {
-		common.ApiErrorMsg(c, fmt.Sprintf("生成数量不能超过 %d", imageStudioMaxTaskCount))
+	body, err := bodyStorage.Bytes()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	count, err := imageStudioRequestedCount(c, c.Request.Header.Get("Content-Type"), body, imageRequest.N)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
 		return
 	}
 	if strings.EqualFold(c.Query("mode"), "edit") {
@@ -216,9 +223,10 @@ func CreateImageStudioTask(c *gin.Context) {
 	contentType := c.Request.Header.Get("Content-Type")
 	requestID := c.GetString(common.RequestIdKey)
 
-	imageCount := uint(1)
-	if imageRequest.N != nil && *imageRequest.N > 0 {
-		imageCount = *imageRequest.N
+	imageCount, err := imageStudioRequestedCount(c, contentType, body, imageRequest.N)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
 	}
 	if imageCount > imageStudioMaxTaskCount {
 		common.ApiErrorMsg(c, fmt.Sprintf("生成数量不能超过 %d", imageStudioMaxTaskCount))
@@ -229,7 +237,10 @@ func CreateImageStudioTask(c *gin.Context) {
 		return
 	}
 	taskBodies, err := buildImageStudioTaskBodies(c, contentType, body, int(imageCount))
-	if err != nil {
+	if err != nil || len(taskBodies) == 0 {
+		if err == nil {
+			err = errors.New("empty image studio batch")
+		}
 		common.ApiError(c, err)
 		return
 	}
@@ -242,10 +253,7 @@ func CreateImageStudioTask(c *gin.Context) {
 		return
 	}
 
-	batchID := ""
-	if imageCount > 1 {
-		batchID = "batch_" + common.GetUUID()
-	}
+	batchID := "batch_" + common.GetUUID()
 	now := time.Now().Unix()
 	taskAction := constant.TaskActionImageGeneration
 	requestMode := "generation"
@@ -256,23 +264,44 @@ func CreateImageStudioTask(c *gin.Context) {
 		relayPath = "/v1/images/edits"
 	}
 
+	// Every child reads the same immutable request body. This is essential for
+	// large edit batches: a 50 MB reference payload is stored once, not 1000x.
+	sharedBodyKey, err := service.StageImageStudioJobBody(batchID, taskBodies[0].ContentType, taskBodies[0].Body)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	priority := 10
+	if imageCount <= constant.ImageStudioInteractiveBatchLimit {
+		priority = 100
+	}
+	batch := &model.ImageStudioBatch{
+		BatchID: batchID, UserID: userID, Mode: requestMode, Group: relayInfo.UsingGroup,
+		Model: imageRequest.Model, Prompt: imageRequest.Prompt, Size: imageRequest.Size, Quality: imageRequest.Quality,
+		TotalCount: int(imageCount), Priority: priority, Status: model.ImageStudioBatchStatusSubmitting,
+		BodyKey: sharedBodyKey, ContentType: taskBodies[0].ContentType, RelayPath: relayPath,
+	}
+	if err := model.CreateImageStudioBatch(batch); err != nil {
+		service.RemoveImageStudioJobBody(sharedBodyKey)
+		common.ApiError(c, err)
+		return
+	}
+
 	taskDTOs := make([]*dto.TaskDto, 0, len(taskBodies))
 	inserted := make([]*model.Task, 0, len(taskBodies))
-	stagedKeys := make([]string, 0, len(taskBodies))
+	committed := false
 	defer func() {
-		// Roll back staged bodies and funding holds if we fail before commit.
-		if len(taskDTOs) == len(taskBodies) {
+		if committed {
 			return
 		}
-		for _, key := range stagedKeys {
-			service.RemoveImageStudioJobBody(key)
-		}
+		service.RemoveImageStudioJobBody(sharedBodyKey)
 		for _, task := range inserted {
 			failAndRefundImageStudioTask(task, "批量任务提交未完成，退回预占额度")
 		}
+		_ = model.DeleteImageStudioBatch(batch.ID)
 	}()
 
-	for index, taskBody := range taskBodies {
+	for index := range taskBodies {
 		childRequestID := imageStudioChildRequestID(requestID, index, len(taskBodies))
 		task := model.InitTask(imageStudioTaskPlatform, relayInfo)
 		task.CreatedAt = now
@@ -280,6 +309,7 @@ func CreateImageStudioTask(c *gin.Context) {
 		task.SubmitTime = now
 		task.Status = model.TaskStatusQueued
 		task.Progress = "0%"
+		task.QueuePriority = priority*10_000 - index
 		task.Action = taskAction
 		task.Properties.Input = imageRequest.Prompt
 		task.PrivateData.Key = ""
@@ -314,34 +344,39 @@ func CreateImageStudioTask(c *gin.Context) {
 			BatchSize:  int(imageCount),
 		}})
 
-		// Stage before insert so a crash between the two leaves an orphan file
-		// that cleanup can remove, never a QUEUED row without a body.
-		bodyKey, stageErr := service.StageImageStudioJobBody(task.TaskID, taskBody.ContentType, taskBody.Body)
-		if stageErr != nil {
-			releaseImageStudioUncommittedHold(userID, task)
-			common.ApiError(c, stageErr)
-			return
-		}
-		stagedKeys = append(stagedKeys, bodyKey)
-		task.PrivateData.StudioBodyKey = bodyKey
-		task.PrivateData.StudioContentType = taskBody.ContentType
+		task.PrivateData.StudioBodyKey = sharedBodyKey
+		task.PrivateData.StudioContentType = taskBodies[0].ContentType
 		task.PrivateData.StudioRelayPath = relayPath
 
 		if err := task.Insert(); err != nil {
 			releaseImageStudioUncommittedHold(userID, task)
-			service.RemoveImageStudioJobBody(bodyKey)
 			common.ApiError(c, err)
 			return
 		}
 		inserted = append(inserted, task)
+		if err := model.CreateImageStudioBatchItem(&model.ImageStudioBatchItem{
+			BatchDBID: batch.ID, TaskDBID: task.ID, BatchIndex: index + 1,
+		}); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		taskDTOs = append(taskDTOs, relay.TaskModel2Dto(task))
 	}
 
-	if len(taskDTOs) == 1 {
-		common.ApiSuccess(c, taskDTOs[0])
-	} else {
-		common.ApiSuccess(c, gin.H{"batch_id": batchID, "tasks": taskDTOs})
+	if err := model.ActivateImageStudioBatch(batch.ID); err != nil {
+		common.ApiError(c, err)
+		return
 	}
+	committed = true
+	responseTasks := taskDTOs
+	if len(responseTasks) > constant.ImageStudioInteractiveBatchLimit {
+		responseTasks = responseTasks[:constant.ImageStudioInteractiveBatchLimit]
+	}
+	common.ApiSuccess(c, gin.H{
+		"batch_id":    batchID,
+		"tasks":       responseTasks,
+		"total_count": len(taskDTOs),
+	})
 	WakeImageStudioWorkers()
 }
 
@@ -369,7 +404,7 @@ func runImageStudioClaimedTask(task *model.Task) {
 			logger.LogError(context.Background(), fmt.Sprintf("image studio task %s panic: %s\n%s", task.TaskID, reason, string(debug.Stack())))
 			failAndRefundImageStudioTask(task, reason)
 		}
-		service.RemoveImageStudioJobBody(task.PrivateData.StudioBodyKey)
+		service.ReleaseImageStudioJobBodyForTask(task)
 	}()
 
 	contentType := task.PrivateData.StudioContentType

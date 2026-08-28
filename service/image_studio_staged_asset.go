@@ -129,7 +129,18 @@ func cleanupImageStudioJobFiles(dir string, cutoff time.Time, limit int) (int, e
 		if err != nil || !info.ModTime().Before(cutoff) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+		name := entry.Name()
+		base := strings.TrimSuffix(strings.TrimSuffix(name, ".body"), ".meta")
+		if base != name {
+			key := filepath.ToSlash(filepath.Join(".jobs", base))
+			inUse, lookupErr := model.ImageStudioBatchBodyKeyInUse(key)
+			if lookupErr != nil || inUse {
+				// Fail closed: a transient DB error must never make cleanup delete
+				// the only shared request body of a still-runnable large batch.
+				continue
+			}
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
 			return removed, err
 		}
 		removed++

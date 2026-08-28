@@ -2,10 +2,14 @@ package controller
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/url"
+	"strconv"
 	"strings"
+
+	"github.com/QuantumNous/new-api/constant"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
@@ -14,6 +18,59 @@ import (
 type imageStudioTaskBody struct {
 	Body        []byte
 	ContentType string
+}
+
+// imageStudioRequestedCount reads Studio's product-level count independently
+// from the upstream image API's n field. New clients send count; legacy clients
+// may still send n. Missing count defaults to 1, while an explicit zero is
+// rejected instead of silently becoming one.
+func imageStudioRequestedCount(c *gin.Context, contentType string, body []byte, legacyN *uint) (uint, error) {
+	var raw string
+	switch {
+	case strings.Contains(contentType, gin.MIMEMultipartPOSTForm):
+		if c != nil && c.Request != nil {
+			raw = strings.TrimSpace(c.Request.PostForm.Get("count"))
+		}
+	case strings.Contains(contentType, gin.MIMEPOSTForm):
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return 0, err
+		}
+		raw = strings.TrimSpace(values.Get("count"))
+	default:
+		var payload map[string]any
+		if len(body) > 0 && common.Unmarshal(body, &payload) == nil {
+			if value, exists := payload["count"]; exists {
+				switch typed := value.(type) {
+				case float64:
+					if typed != float64(int64(typed)) {
+						return 0, fmt.Errorf("count must be an integer")
+					}
+					raw = strconv.FormatInt(int64(typed), 10)
+				case string:
+					raw = strings.TrimSpace(typed)
+				default:
+					return 0, fmt.Errorf("count must be an integer")
+				}
+			}
+		}
+	}
+	if raw == "" {
+		if legacyN != nil {
+			if *legacyN == 0 {
+				return 0, fmt.Errorf("count must be between 1 and %d", constant.ImageStudioMaxBatchSize)
+			}
+			if *legacyN > 0 {
+				return *legacyN, nil
+			}
+		}
+		return 1, nil
+	}
+	count, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil || count < 1 || count > constant.ImageStudioMaxBatchSize {
+		return 0, fmt.Errorf("count must be between 1 and %d", constant.ImageStudioMaxBatchSize)
+	}
+	return uint(count), nil
 }
 
 func buildImageStudioTaskBodies(c *gin.Context, contentType string, body []byte, count int) ([]imageStudioTaskBody, error) {
@@ -35,6 +92,7 @@ func buildImageStudioJSONBodies(body []byte, contentType string, count int) ([]i
 	payload["n"] = 1
 	payload["response_format"] = "b64_json"
 	delete(payload, "group")
+	delete(payload, "count")
 	nextBody, err := common.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -50,6 +108,7 @@ func buildImageStudioFormBodies(body []byte, contentType string, count int) ([]i
 	values.Set("n", "1")
 	values.Set("response_format", "b64_json")
 	values.Del("group")
+	values.Del("count")
 	return duplicateImageStudioBodies([]byte(values.Encode()), contentType, count), nil
 }
 
@@ -78,7 +137,7 @@ func buildImageStudioMultipartBody(form *multipart.Form) ([]byte, string, error)
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
 	for key, values := range form.Value {
-		if key == "n" || key == "response_format" || key == "group" {
+		if key == "n" || key == "response_format" || key == "group" || key == "count" {
 			continue
 		}
 		for _, value := range values {

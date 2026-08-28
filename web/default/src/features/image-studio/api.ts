@@ -22,18 +22,21 @@ import { api } from '@/lib/api'
 
 import type {
   ImageModelCatalogItem,
+  ImageStudioBatchPage,
   ImageStudioEstimate,
   ImageStudioConfig,
   ImageStudioImage,
   ImageStudioSubmission,
   ImageStudioTask,
+  ImageStudioTaskFilter,
+  ImageStudioTaskPage,
 } from './types'
 
 type ImageGenerationPayload = {
   group: string
   model: string
   prompt: string
-  n: number
+  count: number
   size: string
   quality: string
 }
@@ -46,11 +49,6 @@ type ApiEnvelope<T> = {
   success: boolean
   message?: string
   data?: T
-}
-
-type TaskPage = {
-  items?: ImageStudioTask[]
-  total?: number
 }
 
 type TaskSubmissionPayload =
@@ -67,6 +65,8 @@ const requestConfig = {
   skipErrorHandler: true,
   skipBusinessError: true,
 }
+
+const imageStudioTaskPageSize = 60
 
 function assertSuccess(response: ApiEnvelope<unknown>): void {
   if (response.success === false) {
@@ -120,6 +120,8 @@ export async function fetchImageStudioConfig(): Promise<ImageStudioConfig> {
     prompt_presets: res.data.data?.prompt_presets ?? [],
     size_presets: res.data.data?.size_presets ?? [],
     retention_days: res.data.data?.retention_days ?? 0,
+    interactive_batch_limit: res.data.data?.interactive_batch_limit ?? 10,
+    max_batch_size: res.data.data?.max_batch_size ?? 1000,
   }
 }
 
@@ -129,7 +131,10 @@ export async function submitGeneration(
   const res = await api.post<ApiEnvelope<TaskSubmissionPayload>>(
     '/pg/image-studio/generations',
     payload,
-    { ...requestConfig, timeout: 30_000 }
+    {
+      ...requestConfig,
+      timeout: payload.count > 10 ? 120_000 : 30_000,
+    }
   )
   assertSuccess(res.data)
   return normalizeSubmission(res.data.data)
@@ -161,7 +166,10 @@ export async function submitEdit(
   const res = await api.post<ApiEnvelope<TaskSubmissionPayload>>(
     '/pg/image-studio/edits',
     formData,
-    { ...requestConfig, timeout: 30_000 }
+    {
+      ...requestConfig,
+      timeout: Number(formData.get('count') ?? 1) > 10 ? 120_000 : 30_000,
+    }
   )
   assertSuccess(res.data)
   return normalizeSubmission(res.data.data)
@@ -181,18 +189,68 @@ function normalizeSubmission(
   return { batchId: data.batch_id, tasks }
 }
 
-export async function fetchImageTasks(): Promise<ImageStudioTask[]> {
-  const res = await api.get<ApiEnvelope<TaskPage>>('/api/task/self', {
-    ...requestConfig,
-    disableDuplicate: true,
-    params: {
-      p: 1,
-      page_size: 30,
-      platform: 'image_studio',
-    },
-  })
+export async function fetchImageBatches(
+  page = 1
+): Promise<ImageStudioBatchPage> {
+  const res = await api.get<ApiEnvelope<ImageStudioBatchPage>>(
+    '/api/image-studio/batches',
+    {
+      ...requestConfig,
+      disableDuplicate: true,
+      params: { p: page, page_size: 100 },
+    }
+  )
   assertSuccess(res.data)
-  return Array.isArray(res.data?.data?.items) ? res.data.data.items : []
+  return {
+    items: res.data.data?.items ?? [],
+    total: res.data.data?.total ?? 0,
+    page: res.data.data?.page ?? page,
+    page_size: res.data.data?.page_size ?? 100,
+  }
+}
+
+export async function fetchImageLibraryTasks(
+  page = 1,
+  status: ImageStudioTaskFilter = 'all'
+): Promise<ImageStudioTaskPage> {
+  const res = await api.get<ApiEnvelope<ImageStudioTaskPage>>(
+    '/api/image-studio/library/tasks',
+    {
+      ...requestConfig,
+      disableDuplicate: true,
+      params: { p: page, page_size: imageStudioTaskPageSize, status },
+    }
+  )
+  assertSuccess(res.data)
+  return {
+    items: res.data.data?.items ?? [],
+    total: res.data.data?.total ?? 0,
+    page: res.data.data?.page ?? page,
+    page_size: res.data.data?.page_size ?? imageStudioTaskPageSize,
+    summary: res.data.data?.summary,
+  }
+}
+
+export async function fetchImageBatchTasks(
+  batchID: string,
+  page = 1,
+  status: ImageStudioTaskFilter = 'all'
+): Promise<ImageStudioTaskPage> {
+  const res = await api.get<ApiEnvelope<ImageStudioTaskPage>>(
+    `/api/image-studio/batches/${encodeURIComponent(batchID)}/tasks`,
+    {
+      ...requestConfig,
+      disableDuplicate: true,
+      params: { p: page, page_size: imageStudioTaskPageSize, status },
+    }
+  )
+  assertSuccess(res.data)
+  return {
+    items: res.data.data?.items ?? [],
+    total: res.data.data?.total ?? 0,
+    page: res.data.data?.page ?? page,
+    page_size: res.data.data?.page_size ?? imageStudioTaskPageSize,
+  }
 }
 
 export async function deleteImageTasks(taskIds: string[]): Promise<void> {
@@ -224,14 +282,58 @@ export async function fetchImageBlob(image: ImageStudioImage): Promise<Blob> {
   return response.data
 }
 
-export async function downloadImageArchive(taskIDs: string[]): Promise<Blob> {
-  const params = new URLSearchParams({ task_ids: taskIDs.join(',') })
+export async function deleteImageLibrary(): Promise<void> {
+  const res = await api.delete<ApiEnvelope<unknown>>(
+    '/api/image-studio/library',
+    requestConfig
+  )
+  assertSuccess(res.data)
+}
+
+export async function deleteFailedImageLibraryTasks(): Promise<void> {
+  const res = await api.delete<ApiEnvelope<unknown>>(
+    '/api/image-studio/library/failed',
+    requestConfig
+  )
+  assertSuccess(res.data)
+}
+
+export async function downloadImageLibrary(): Promise<Blob> {
+  const res = await api.get<Blob>('/api/image-studio/library/download', {
+    ...requestConfig,
+    disableDuplicate: true,
+    responseType: 'blob',
+    timeout: 0,
+  })
+  return res.data
+}
+
+export async function deleteImageBatch(batchID: string): Promise<void> {
+  const res = await api.delete<ApiEnvelope<unknown>>(
+    `/api/image-studio/batches/${encodeURIComponent(batchID)}`,
+    requestConfig
+  )
+  assertSuccess(res.data)
+}
+
+export async function deleteFailedImageBatchTasks(
+  batchID: string
+): Promise<void> {
+  const res = await api.delete<ApiEnvelope<unknown>>(
+    `/api/image-studio/batches/${encodeURIComponent(batchID)}/failed`,
+    requestConfig
+  )
+  assertSuccess(res.data)
+}
+
+export async function downloadImageBatch(batchID: string): Promise<Blob> {
   const res = await api.get<Blob>(
-    `/api/task/image-studio/download?${params.toString()}`,
+    `/api/image-studio/batches/${encodeURIComponent(batchID)}/download`,
     {
       ...requestConfig,
       disableDuplicate: true,
       responseType: 'blob',
+      timeout: 0,
     }
   )
   return res.data

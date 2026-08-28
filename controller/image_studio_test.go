@@ -37,13 +37,18 @@ func setupImageStudioAssetDB(t *testing.T) {
 	previous := model.DB
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.ImageStudioAsset{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.Task{},
+		&model.ImageStudioBatch{},
+		&model.ImageStudioBatchItem{},
+		&model.ImageStudioAsset{},
+	))
 	model.DB = db
 	t.Cleanup(func() { model.DB = previous })
 }
 
 func TestBuildImageStudioJSONBodiesSplitsAndPreservesExplicitZeroValues(t *testing.T) {
-	body := []byte(`{"model":"gpt-image-1","prompt":"cat","n":3,"group":"vip","watermark":false,"output_compression":0}`)
+	body := []byte(`{"model":"gpt-image-1","prompt":"cat","n":3,"count":1000,"group":"vip","watermark":false,"output_compression":0}`)
 	bodies, err := buildImageStudioJSONBodies(body, "application/json", 3)
 	require.NoError(t, err)
 	require.Len(t, bodies, 3)
@@ -55,8 +60,27 @@ func TestBuildImageStudioJSONBodiesSplitsAndPreservesExplicitZeroValues(t *testi
 		assert.Equal(t, false, payload["watermark"])
 		assert.EqualValues(t, 0, payload["output_compression"])
 		assert.NotContains(t, payload, "group")
+		assert.NotContains(t, payload, "count")
 	}
 	assert.Same(t, &bodies[0].Body[0], &bodies[1].Body[0])
+}
+
+func TestImageStudioRequestedCountUsesStudioCountAndRejectsZero(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/pg/image-studio/generations", nil)
+
+	count, err := imageStudioRequestedCount(context, "application/json", []byte(`{"count":1000}`), nil)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1000, count)
+
+	_, err = imageStudioRequestedCount(context, "application/json", []byte(`{"count":0}`), nil)
+	require.Error(t, err)
+
+	legacy := uint(10)
+	count, err = imageStudioRequestedCount(context, "application/json", []byte(`{}`), &legacy)
+	require.NoError(t, err)
+	assert.EqualValues(t, 10, count)
 }
 
 func TestImageStudioMultipartJobBodyPreservesRebuiltBoundary(t *testing.T) {
@@ -68,6 +92,7 @@ func TestImageStudioMultipartJobBodyPreservesRebuiltBoundary(t *testing.T) {
 	require.NoError(t, writer.WriteField("prompt", "edit me"))
 	require.NoError(t, writer.WriteField("model", "gpt-image-1"))
 	require.NoError(t, writer.WriteField("n", "2"))
+	require.NoError(t, writer.WriteField("count", "1000"))
 	part, err := writer.CreateFormFile("image", "source.png")
 	require.NoError(t, err)
 	_, err = part.Write([]byte("fake-image"))
@@ -117,6 +142,7 @@ func TestImageStudioMultipartJobBodyPreservesRebuiltBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"1"}, replayedForm.Value["n"])
 	require.Equal(t, []string{"b64_json"}, replayedForm.Value["response_format"])
+	require.NotContains(t, replayedForm.Value, "count")
 	require.Len(t, replayedForm.File["image"], 1)
 }
 
@@ -303,6 +329,51 @@ func TestClaimNextImageStudioTaskIsCAS(t *testing.T) {
 	second, err := model.ClaimNextImageStudioTask()
 	require.NoError(t, err)
 	assert.Nil(t, second)
+}
+
+func TestClaimNextImageStudioTaskWaitsForBatchActivation(t *testing.T) {
+	setupImageStudioAssetDB(t)
+	now := time.Now().Unix()
+	batch := &model.ImageStudioBatch{
+		BatchID: "batch-claim-gate", UserID: 1, Mode: "generation", Group: "default",
+		Model: "gpt-image-1", TotalCount: 1, Priority: 100,
+		Status: model.ImageStudioBatchStatusSubmitting, RelayPath: "/v1/images/generations",
+	}
+	require.NoError(t, model.CreateImageStudioBatch(batch))
+	task := &model.Task{
+		CreatedAt: now, UpdatedAt: now, SubmitTime: now,
+		TaskID: "task_claim_gated", Platform: constant.TaskPlatformImageStudio,
+		UserId: 1, Status: model.TaskStatusQueued, Progress: "0%",
+		Data: json.RawMessage(`{"request":{"model":"gpt-image-1"}}`),
+	}
+	require.NoError(t, task.Insert())
+	require.NoError(t, model.CreateImageStudioBatchItem(&model.ImageStudioBatchItem{
+		BatchDBID: batch.ID, TaskDBID: task.ID, BatchIndex: 1,
+	}))
+
+	blocked, err := model.ClaimNextImageStudioTask()
+	require.NoError(t, err)
+	assert.Nil(t, blocked)
+	summary, exists, err := model.GetImageStudioBatchSummary(batch.UserID, batch.BatchID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Zero(t, summary.DeletedCount)
+	assert.Zero(t, summary.FinishedCount)
+	assert.Equal(t, model.ImageStudioBatchStatusQueued, summary.Status)
+	refreshed, err := model.RefreshImageStudioBatch(batch.ID)
+	require.NoError(t, err)
+	require.NotNil(t, refreshed)
+	assert.Equal(t, model.ImageStudioBatchStatusQueued, refreshed.Status)
+	storedBatch, exists, err := model.GetImageStudioBatchByID(batch.ID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, model.ImageStudioBatchStatusSubmitting, storedBatch.Status)
+
+	require.NoError(t, model.ActivateImageStudioBatch(batch.ID))
+	claimed, err := model.ClaimNextImageStudioTask()
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	assert.Equal(t, task.TaskID, claimed.TaskID)
 }
 
 func TestImageStudioBatchConcurrencyIsConfigurableAndBounded(t *testing.T) {

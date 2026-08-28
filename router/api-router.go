@@ -36,6 +36,24 @@ func SetApiRouter(router *gin.Engine) {
 		//apiRouter.GET("/midjourney", controller.GetMidjourney)
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.HeaderNavModuleAuth("pricing"), controller.GetPricing)
+		imageStudioLibraryRoute := apiRouter.Group("/image-studio/library")
+		imageStudioLibraryRoute.Use(middleware.UserAuth())
+		{
+			imageStudioLibraryRoute.GET("/tasks", controller.ListImageStudioLibraryTasks)
+			imageStudioLibraryRoute.GET("/download", controller.DownloadImageStudioLibrary)
+			imageStudioLibraryRoute.DELETE("/failed", controller.DeleteImageStudioLibraryFailures)
+			imageStudioLibraryRoute.DELETE("", controller.DeleteImageStudioLibrary)
+		}
+		imageStudioBatchRoute := apiRouter.Group("/image-studio/batches")
+		imageStudioBatchRoute.Use(middleware.UserAuth())
+		{
+			imageStudioBatchRoute.GET("", controller.ListImageStudioBatches)
+			imageStudioBatchRoute.GET("/:batch_id", controller.GetImageStudioBatch)
+			imageStudioBatchRoute.GET("/:batch_id/tasks", controller.ListImageStudioBatchTasks)
+			imageStudioBatchRoute.GET("/:batch_id/download", controller.DownloadImageStudioBatch)
+			imageStudioBatchRoute.DELETE("/:batch_id/failed", controller.DeleteImageStudioBatchFailures)
+			imageStudioBatchRoute.DELETE("/:batch_id", controller.DeleteImageStudioBatch)
+		}
 		imageStudioAssetRoute := apiRouter.Group("/image-studio/assets")
 		imageStudioAssetRoute.Use(middleware.PublicAssetCORS())
 		{

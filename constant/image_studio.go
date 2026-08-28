@@ -3,6 +3,8 @@ package constant
 const (
 	ImageStudioDefaultBatchConcurrency = 10
 	ImageStudioMaxBatchConcurrency     = 10
+	ImageStudioInteractiveBatchLimit   = 10
+	ImageStudioMaxBatchSize            = 1000
 	ImageStudioDefaultTimeoutMinutes   = 10
 	ImageStudioMinTimeoutMinutes       = 1
 	ImageStudioMaxTimeoutMinutes       = 120

@@ -172,8 +172,10 @@ func GetImageStudioConfig(c *gin.Context) {
 		}
 	}
 	common.ApiSuccess(c, gin.H{
-		"prompt_presets": presets,
-		"size_presets":   enabledSizePresets,
-		"retention_days": service.ImageStudioRetentionDays(),
+		"prompt_presets":          presets,
+		"size_presets":            enabledSizePresets,
+		"retention_days":          service.ImageStudioRetentionDays(),
+		"interactive_batch_limit": constant.ImageStudioInteractiveBatchLimit,
+		"max_batch_size":          constant.ImageStudioMaxBatchSize,
 	})
 }

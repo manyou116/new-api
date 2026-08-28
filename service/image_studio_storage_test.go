@@ -319,6 +319,34 @@ func TestImageStudioResponseSpoolUsesManagedStorageAndReleasesReservation(t *tes
 	imageStudioTemporaryStorage.Unlock()
 }
 
+func TestImageStudioCleanupKeepsSubmittingBatchBodyWithoutChildren(t *testing.T) {
+	truncate(t)
+	root := t.TempDir()
+	t.Setenv("IMAGE_STUDIO_STORAGE_PATH", root)
+	key, err := StageImageStudioJobBody("batch-submitting-body", "application/json", []byte(`{"n":1}`))
+	require.NoError(t, err)
+	batch := &model.ImageStudioBatch{
+		BatchID: "batch-submitting-body", UserID: 999, Mode: "generation", Group: "default",
+		Model: "gpt-image-1", TotalCount: 100, Priority: 10,
+		Status: model.ImageStudioBatchStatusSubmitting, BodyKey: key,
+		ContentType: "application/json", RelayPath: "/v1/images/generations",
+	}
+	require.NoError(t, model.CreateImageStudioBatch(batch))
+	old := time.Now().Add(-time.Hour)
+	bodyPath := filepath.Join(root, filepath.FromSlash(key)+".body")
+	metaPath := filepath.Join(root, filepath.FromSlash(key)+".meta")
+	require.NoError(t, os.Chtimes(bodyPath, old, old))
+	require.NoError(t, os.Chtimes(metaPath, old, old))
+
+	removed, err := cleanupImageStudioTemporaryFiles(time.Now().Add(-10*time.Minute), 10)
+	require.NoError(t, err)
+	assert.Zero(t, removed)
+	_, err = os.Stat(bodyPath)
+	require.NoError(t, err)
+	_, err = os.Stat(metaPath)
+	require.NoError(t, err)
+}
+
 func TestImageStudioCleanupRemovesOrphanTemporaryFiles(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("IMAGE_STUDIO_STORAGE_PATH", root)

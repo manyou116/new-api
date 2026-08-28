@@ -15,8 +15,11 @@ func ClaimNextImageStudioTask() (*Task, error) {
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var tasks []Task
 		if err := lockForUpdate(tx).
-			Where("platform = ? AND status = ?", constant.TaskPlatformImageStudio, TaskStatusQueued).
-			Order("submit_time, id").
+			Joins("LEFT JOIN image_studio_batch_items AS studio_items ON studio_items.task_db_id = tasks.id").
+			Joins("LEFT JOIN image_studio_batches AS studio_batches ON studio_batches.id = studio_items.batch_db_id").
+			Where("tasks.platform = ? AND tasks.status = ?", constant.TaskPlatformImageStudio, TaskStatusQueued).
+			Where("studio_items.id IS NULL OR studio_batches.status <> ?", ImageStudioBatchStatusSubmitting).
+			Order("tasks.queue_priority DESC, tasks.submit_time, tasks.id").
 			Limit(1).
 			Find(&tasks).Error; err != nil {
 			return err

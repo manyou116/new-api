@@ -97,6 +97,76 @@ func TestImageStudioRecoveryRetriesZeroRefundTarget(t *testing.T) {
 	assert.Zero(t, adjustment.Quota)
 }
 
+func TestRecoverStaleSubmittingImageStudioBatchActivatesCompleteBatch(t *testing.T) {
+	truncate(t)
+	const userID = 910
+	batch := &model.ImageStudioBatch{
+		BatchID: "batch_recover_complete_submit", UserID: userID, Mode: "generation", Group: "default",
+		Model: "gpt-image-1", TotalCount: 1, Priority: 100,
+		Status: model.ImageStudioBatchStatusSubmitting, RelayPath: "/v1/images/generations",
+		CreatedAt: time.Now().Add(-time.Hour).Unix(),
+	}
+	require.NoError(t, model.CreateImageStudioBatch(batch))
+	task := makeTask(userID, 0, 0, 0, BillingSourceWallet, 0)
+	task.TaskID = "task_recover_complete_submit"
+	task.Platform = constant.TaskPlatformImageStudio
+	task.Status = model.TaskStatusQueued
+	task.Progress = "0%"
+	task.SubmitTime = batch.CreatedAt
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, model.CreateImageStudioBatchItem(&model.ImageStudioBatchItem{
+		BatchDBID: batch.ID, TaskDBID: task.ID, BatchIndex: 1,
+	}))
+
+	RecoverStaleSubmittingImageStudioBatches(context.Background(), time.Now().Unix())
+
+	storedBatch, exists, err := model.GetImageStudioBatch(userID, batch.BatchID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, model.ImageStudioBatchStatusQueued, storedBatch.Status)
+	storedTask, exists, err := model.GetByTaskId(userID, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.EqualValues(t, model.TaskStatusQueued, storedTask.Status)
+}
+
+func TestRecoverStaleSubmittingImageStudioBatchFailsPartialBatchAndRefunds(t *testing.T) {
+	truncate(t)
+	const userID = 911
+	const heldQuota = 200
+	seedUser(t, userID, 800)
+	batch := &model.ImageStudioBatch{
+		BatchID: "batch_recover_partial_submit", UserID: userID, Mode: "generation", Group: "default",
+		Model: "gpt-image-1", TotalCount: 2, Priority: 100,
+		Status: model.ImageStudioBatchStatusSubmitting, RelayPath: "/v1/images/generations",
+		CreatedAt: time.Now().Add(-time.Hour).Unix(),
+	}
+	require.NoError(t, model.CreateImageStudioBatch(batch))
+	task := makeTask(userID, 0, heldQuota, 0, BillingSourceWallet, 0)
+	task.TaskID = "task_recover_partial_submit"
+	task.Platform = constant.TaskPlatformImageStudio
+	task.Status = model.TaskStatusQueued
+	task.Progress = "0%"
+	task.SubmitTime = batch.CreatedAt
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, model.CreateImageStudioBatchItem(&model.ImageStudioBatchItem{
+		BatchDBID: batch.ID, TaskDBID: task.ID, BatchIndex: 1,
+	}))
+
+	RecoverStaleSubmittingImageStudioBatches(context.Background(), time.Now().Unix())
+
+	storedBatch, exists, err := model.GetImageStudioBatch(userID, batch.BatchID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, model.ImageStudioBatchStatusFailed, storedBatch.Status)
+	storedTask, exists, err := model.GetByTaskId(userID, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.EqualValues(t, model.TaskStatusFailure, storedTask.Status)
+	assert.Equal(t, "100%", storedTask.Progress)
+	assert.Equal(t, 1000, getUserQuota(t, userID))
+}
+
 func TestImageStudioRecoveryUsesConfiguredRuntimeTimeout(t *testing.T) {
 	truncate(t)
 	common.OptionMapRWMutex.Lock()

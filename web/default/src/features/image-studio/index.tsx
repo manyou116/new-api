@@ -32,18 +32,33 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { getUserGroups, getUserModels } from '@/features/playground/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useImageStudioPreferencesStore } from '@/stores/image-studio-preferences-store'
 
 import {
+  deleteFailedImageBatchTasks,
+  deleteFailedImageLibraryTasks,
+  deleteImageBatch,
+  deleteImageLibrary,
   deleteImageTasks,
-  downloadImageArchive,
+  downloadImageBatch,
+  downloadImageLibrary,
+  fetchImageBatchTasks,
+  fetchImageBatches,
+  fetchImageLibraryTasks,
   fetchImageBlob,
   fetchImageModelCatalog,
   fetchImageStudioConfig,
-  fetchImageTasks,
   submitEdit,
   submitGeneration,
 } from './api'
@@ -51,27 +66,42 @@ import { StudioForm } from './components/studio-form'
 import { TaskGallery } from './components/task-gallery'
 import { imageStudioModeForFiles } from './reference-files'
 import type {
+  ImageStudioBatchSummary,
   ImageStudioDraft,
   ImageStudioFormValues,
   ImageStudioImage,
-  ImageStudioSubmission,
-  ImageStudioTask,
+  ImageStudioLibrarySummary,
+  ImageStudioTaskFilter,
   NormalizedImageStudioTask,
 } from './types'
 import {
   errorMessage,
   filterImageModels,
+  formatTaskTime,
   imageFileExtension,
-  isActiveTask,
   normalizeTask,
   selectImageStudioGroup,
 } from './utils'
 
-const TASK_QUERY_KEY = ['image-studio', 'tasks'] as const
+const ALL_STUDIO_SCOPE = '__all__'
 
 type PendingDelete = {
   taskIDs: string[]
-  scope: 'single' | 'all'
+  scope: 'single' | 'all' | 'failed'
+  batchID?: string
+  library?: boolean
+  totalCount?: number
+}
+
+function saveArchive(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function valuesFromTask(
@@ -85,17 +115,6 @@ function valuesFromTask(
     quality: task.request.quality || 'default',
     count: task.request.batch_size || task.request.n || 1,
   }
-}
-
-function mergeSubmittedTasks(
-  current: ImageStudioTask[] | undefined,
-  submission: ImageStudioSubmission
-) {
-  const submittedIDs = new Set(submission.tasks.map((task) => task.task_id))
-  return [
-    ...submission.tasks,
-    ...(current ?? []).filter((task) => !submittedIDs.has(task.task_id)),
-  ]
 }
 
 export function ImageStudio() {
@@ -118,6 +137,8 @@ export function ImageStudio() {
   const [model, setModel] = useState('')
   const [selectionUserID, setSelectionUserID] = useState<number | null>(null)
   const [activeBatchID, setActiveBatchID] = useState<string>()
+  const [taskFilter, setTaskFilter] = useState<ImageStudioTaskFilter>('all')
+  const [taskPage, setTaskPage] = useState(1)
   const [draft, setDraft] = useState<ImageStudioDraft>({
     revision: 0,
     values: {},
@@ -146,13 +167,61 @@ export function ImageStudio() {
     staleTime: 5 * 60 * 1000,
     refetchOnMount: 'always',
   })
-  const tasksQuery = useQuery({
-    queryKey: TASK_QUERY_KEY,
-    queryFn: fetchImageTasks,
+  const batchesQuery = useQuery({
+    queryKey: ['image-studio', 'batches'],
+    queryFn: () => fetchImageBatches(1),
+    refetchInterval: (query) =>
+      query.state.data?.items.some(
+        (batch) => batch.status === 'queued' || batch.status === 'running'
+      )
+        ? 3000
+        : 30_000,
+  })
+  const selectedBatch = useMemo(() => {
+    if (!activeBatchID) return undefined
+    return batchesQuery.data?.items.find(
+      (batch) => batch.batch_id === activeBatchID
+    )
+  }, [activeBatchID, batchesQuery.data?.items])
+  const libraryTasksQuery = useQuery({
+    queryKey: ['image-studio', 'library-tasks', taskFilter, taskPage],
+    queryFn: () => fetchImageLibraryTasks(taskPage, taskFilter),
+    enabled: !activeBatchID,
     refetchInterval: (query) => {
-      const tasks = query.state.data
-      return tasks?.some(isActiveTask) ? 3000 : 30_000
+      const summary = query.state.data?.summary
+      return summary && (summary.active_count > 0 || summary.queued_count > 0)
+        ? 3000
+        : 30_000
     },
+  })
+  useEffect(() => {
+    if (
+      activeBatchID &&
+      !batchesQuery.isLoading &&
+      batchesQuery.data &&
+      !selectedBatch
+    ) {
+      setActiveBatchID(undefined)
+      setTaskFilter('all')
+      setTaskPage(1)
+    }
+  }, [activeBatchID, batchesQuery.data, batchesQuery.isLoading, selectedBatch])
+
+  const batchTasksQuery = useQuery({
+    queryKey: [
+      'image-studio',
+      'batch-tasks',
+      selectedBatch?.batch_id,
+      taskFilter,
+      taskPage,
+    ],
+    queryFn: () =>
+      fetchImageBatchTasks(selectedBatch?.batch_id ?? '', taskPage, taskFilter),
+    enabled: Boolean(selectedBatch?.batch_id),
+    refetchInterval:
+      selectedBatch?.status === 'queued' || selectedBatch?.status === 'running'
+        ? 3000
+        : false,
   })
 
   const models = useMemo(
@@ -164,10 +233,23 @@ export function ImageStudio() {
       ),
     [group, modelsQuery.data, pricingQuery.data]
   )
+  const librarySummary = libraryTasksQuery.data?.summary
+  const taskPageData = selectedBatch
+    ? batchTasksQuery.data
+    : libraryTasksQuery.data
   const tasks = useMemo(
-    () => (tasksQuery.data ?? []).map(normalizeTask),
-    [tasksQuery.data]
+    () => (taskPageData?.items ?? []).map(normalizeTask),
+    [taskPageData?.items]
   )
+  const taskPageSize = taskPageData?.page_size ?? 60
+  const taskTotal = taskPageData?.total ?? 0
+  const taskTotalPages = Math.max(1, Math.ceil(taskTotal / taskPageSize))
+
+  useEffect(() => {
+    if (taskPageData && taskPage > taskTotalPages) {
+      setTaskPage(taskTotalPages)
+    }
+  }, [taskPage, taskPageData, taskTotalPages])
 
   useEffect(() => {
     if (
@@ -258,7 +340,7 @@ export function ImageStudio() {
           group: values.group,
           model: values.model,
           prompt: values.prompt,
-          n: values.count,
+          count: values.count,
           size: values.size === 'default' ? '' : values.size,
           quality: values.quality === 'default' ? '' : values.quality,
         })
@@ -268,21 +350,23 @@ export function ImageStudio() {
       formData.set('group', values.group)
       formData.set('model', values.model)
       formData.set('prompt', values.prompt)
-      formData.set('n', String(values.count))
+      formData.set('count', String(values.count))
       if (values.size !== 'default') formData.set('size', values.size)
       if (values.quality !== 'default') formData.set('quality', values.quality)
       images.forEach((image) => formData.append('image', image))
       return submitEdit(formData)
     },
-    onSuccess: (submission) => {
-      queryClient.setQueryData<ImageStudioTask[]>(TASK_QUERY_KEY, (current) =>
-        mergeSubmittedTasks(current, submission)
-      )
-      setActiveBatchID(
-        submission.batchId || submission.tasks[0]?.task_id || undefined
-      )
+    onSuccess: () => {
+      setActiveBatchID(undefined)
+      setTaskFilter('all')
+      setTaskPage(1)
       toast.success(t('Image task submitted.'))
-      void queryClient.invalidateQueries({ queryKey: TASK_QUERY_KEY })
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'batches'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'library-tasks'],
+      })
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -290,10 +374,6 @@ export function ImageStudio() {
   const deleteMutation = useMutation({
     mutationFn: deleteImageTasks,
     onSuccess: (_, taskIDs) => {
-      const deleted = new Set(taskIDs)
-      queryClient.setQueryData<ImageStudioTask[]>(TASK_QUERY_KEY, (current) =>
-        (current ?? []).filter((task) => !deleted.has(task.task_id))
-      )
       toast.success(
         taskIDs.length === 1
           ? t('Task deleted.')
@@ -302,29 +382,110 @@ export function ImageStudio() {
             })
       )
       setPendingDelete(null)
-      void queryClient.invalidateQueries({ queryKey: TASK_QUERY_KEY })
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'batches'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'library-tasks'],
+      })
+      if (selectedBatch) {
+        void queryClient.invalidateQueries({
+          queryKey: ['image-studio', 'batch-tasks', selectedBatch.batch_id],
+        })
+      }
     },
     onError: (error) => toast.error(errorMessage(error)),
     onSettled: () => setDeletingTaskID(null),
   })
 
-  const downloadMutation = useMutation({
-    mutationFn: async (batchTasks: NormalizedImageStudioTask[]) => ({
-      archive: await downloadImageArchive(
-        batchTasks.map((task) => task.task_id)
-      ),
-      count: batchTasks.length,
+  const libraryDeleteMutation = useMutation({
+    mutationFn: deleteImageLibrary,
+    onSuccess: () => {
+      toast.success(t('Creation library cleared.'))
+      setPendingDelete(null)
+      setActiveBatchID(undefined)
+      setTaskFilter('all')
+      setTaskPage(1)
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'batches'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'library-tasks'],
+      })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  const batchDeleteMutation = useMutation({
+    mutationFn: deleteImageBatch,
+    onSuccess: () => {
+      toast.success(t('Batch deleted.'))
+      setPendingDelete(null)
+      setActiveBatchID(undefined)
+      setTaskFilter('all')
+      setTaskPage(1)
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'batches'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'library-tasks'],
+      })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  const failedCleanupMutation = useMutation({
+    mutationFn: async ({ batchID }: { batchID?: string; count: number }) => {
+      if (batchID) {
+        await deleteFailedImageBatchTasks(batchID)
+        return
+      }
+      await deleteFailedImageLibraryTasks()
+    },
+    onSuccess: (_, scope) => {
+      toast.success(
+        t('Cleared {{count}} failed tasks.', { count: scope.count })
+      )
+      setPendingDelete(null)
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'batches'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['image-studio', 'library-tasks'],
+      })
+      if (scope.batchID) {
+        void queryClient.invalidateQueries({
+          queryKey: ['image-studio', 'batch-tasks', scope.batchID],
+        })
+      }
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  const libraryDownloadMutation = useMutation({
+    mutationFn: async (summary: ImageStudioLibrarySummary) => ({
+      archive: await downloadImageLibrary(),
+      summary,
     }),
-    onSuccess: ({ archive, count }) => {
-      const url = URL.createObjectURL(archive)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = `ai-studio-images-${new Date().toISOString().slice(0, 10)}.zip`
-      document.body.append(anchor)
-      anchor.click()
-      anchor.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 0)
-      toast.success(t('Downloaded {{count}} images.', { count }))
+    onSuccess: ({ archive, summary }) => {
+      saveArchive(archive, 'ai-studio-all.zip')
+      toast.success(
+        t('Downloaded {{count}} images.', { count: summary.success_count })
+      )
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  const batchDownloadMutation = useMutation({
+    mutationFn: async (batch: ImageStudioBatchSummary) => ({
+      archive: await downloadImageBatch(batch.batch_id),
+      batch,
+    }),
+    onSuccess: ({ archive, batch }) => {
+      saveArchive(archive, `ai-studio-${batch.batch_id}.zip`)
+      toast.success(
+        t('Downloaded {{count}} images.', { count: batch.success_count })
+      )
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -379,9 +540,51 @@ export function ImageStudio() {
     anchor.click()
   }
 
-  const downloadBatch = (batchTasks: NormalizedImageStudioTask[]) => {
-    if (batchTasks.length === 0 || downloadMutation.isPending) return
-    downloadMutation.mutate(batchTasks)
+  const changeTaskPage = (page: number) => {
+    setTaskPage(page)
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector('#studio-results-title')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  let pendingDeleteTitle = t('Delete result')
+  let pendingDeleteActionLabel = t('Delete')
+  let pendingDeleteDescription = t(
+    'Delete this completed task and its stored images?'
+  )
+  if (pendingDelete?.scope === 'failed') {
+    pendingDeleteTitle = t('Clear failed tasks')
+    pendingDeleteActionLabel = t('Clear failed tasks')
+    pendingDeleteDescription = pendingDelete.batchID
+      ? t(
+          'Delete all {{count}} failed tasks from this batch? Successful and running tasks will be kept. This cannot be undone.',
+          { count: pendingDelete.totalCount ?? 0 }
+        )
+      : t(
+          'Delete all {{count}} failed tasks from your Studio library? Successful and running tasks will be kept. This cannot be undone.',
+          { count: pendingDelete.totalCount ?? 0 }
+        )
+  } else if (pendingDelete?.scope === 'all') {
+    pendingDeleteTitle = t('Clear all')
+    pendingDeleteActionLabel = t('Clear all')
+    if (pendingDelete.library) {
+      pendingDeleteDescription = t(
+        'Delete all {{count}} completed Studio results? This cannot be undone.',
+        { count: pendingDelete.totalCount ?? 0 }
+      )
+    } else if (pendingDelete.batchID) {
+      pendingDeleteDescription = t(
+        'Delete this completed batch and all {{count}} stored image results? This cannot be undone.',
+        { count: pendingDelete.totalCount ?? 0 }
+      )
+    } else {
+      pendingDeleteDescription = t(
+        'Delete {{count}} finished tasks and their stored images? Running tasks will be kept. This cannot be undone.',
+        { count: pendingDelete.taskIDs.length }
+      )
+    }
   }
 
   return (
@@ -409,6 +612,10 @@ export function ImageStudio() {
           selectedModel={model}
           initialValues={draft.values}
           initialFiles={draft.files}
+          maxBatchSize={studioConfigQuery.data?.max_batch_size ?? 1000}
+          interactiveBatchLimit={
+            studioConfigQuery.data?.interactive_batch_limit ?? 10
+          }
           isLoadingOptions={
             groupsQuery.isLoading ||
             pricingQuery.isLoading ||
@@ -443,31 +650,147 @@ export function ImageStudio() {
         />
 
         <div className='min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1'>
+          <div className='mb-3 flex flex-col gap-1.5 sm:max-w-sm'>
+            <span className='text-muted-foreground text-xs font-medium'>
+              {t('View scope')}
+            </span>
+            <Select
+              items={[
+                {
+                  value: ALL_STUDIO_SCOPE,
+                  label: `${t('All creations')} (${librarySummary?.total_count ?? 0})`,
+                },
+                ...(batchesQuery.data?.items ?? []).map((batch) => ({
+                  value: batch.batch_id,
+                  label: `${formatTaskTime(batch.created_at)} · ${t('{{count}} images', { count: batch.total_count })} · ${t('{{count}} completed', { count: batch.success_count })}`,
+                })),
+              ]}
+              value={activeBatchID ?? ALL_STUDIO_SCOPE}
+              onValueChange={(value) => {
+                setTaskFilter('all')
+                setTaskPage(1)
+                if (value === null || value === ALL_STUDIO_SCOPE) {
+                  setActiveBatchID(undefined)
+                  return
+                }
+                setActiveBatchID(value)
+              }}
+            >
+              <SelectTrigger className='w-full'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  <SelectItem value={ALL_STUDIO_SCOPE}>
+                    {t('All creations')} ({librarySummary?.total_count ?? 0})
+                  </SelectItem>
+                  {(batchesQuery.data?.items ?? []).map((batch) => (
+                    <SelectItem key={batch.batch_id} value={batch.batch_id}>
+                      {formatTaskTime(batch.created_at)} ·{' '}
+                      {t('{{count}} images', { count: batch.total_count })} ·{' '}
+                      {t('{{count}} completed', {
+                        count: batch.success_count,
+                      })}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
           <TaskGallery
+            key={selectedBatch?.batch_id ?? ALL_STUDIO_SCOPE}
             tasks={tasks}
             retentionDays={studioConfigQuery.data?.retention_days ?? 0}
-            activeBatchID={activeBatchID}
-            isLoading={tasksQuery.isLoading}
-            isRefreshing={tasksQuery.isFetching}
-            isDownloading={downloadMutation.isPending}
-            isClearing={
-              deleteMutation.isPending && pendingDelete?.scope === 'all'
+            activeBatch={selectedBatch}
+            librarySummary={selectedBatch ? undefined : librarySummary}
+            filter={taskFilter}
+            page={taskPage}
+            pageSize={taskPageSize}
+            total={taskTotal}
+            isLoading={
+              batchesQuery.isLoading ||
+              Boolean(activeBatchID && !selectedBatch) ||
+              (selectedBatch
+                ? batchTasksQuery.isLoading
+                : libraryTasksQuery.isLoading)
             }
+            isRefreshing={
+              selectedBatch
+                ? batchTasksQuery.isFetching
+                : libraryTasksQuery.isFetching
+            }
+            isDownloading={
+              batchDownloadMutation.isPending ||
+              libraryDownloadMutation.isPending
+            }
+            isClearing={
+              batchDeleteMutation.isPending ||
+              libraryDeleteMutation.isPending ||
+              (deleteMutation.isPending && pendingDelete?.scope === 'all')
+            }
+            isClearingFailed={failedCleanupMutation.isPending}
             deletingTaskID={deletingTaskID}
-            onRefresh={() => void tasksQuery.refetch()}
+            onRefresh={() => {
+              void batchesQuery.refetch()
+              if (selectedBatch) {
+                void batchTasksQuery.refetch()
+              } else {
+                void libraryTasksQuery.refetch()
+              }
+            }}
             onDelete={(taskID) =>
               setPendingDelete({ taskIDs: [taskID], scope: 'single' })
             }
             onDownload={(task, image, index) =>
               downloadImage(task, image, index)
             }
-            onDownloadBatch={downloadBatch}
-            onClearAll={(clearableTasks) =>
+            onDownloadScope={() => {
+              if (selectedBatch) {
+                if (!batchDownloadMutation.isPending) {
+                  batchDownloadMutation.mutate(selectedBatch)
+                }
+                return
+              }
+              if (librarySummary && !libraryDownloadMutation.isPending) {
+                libraryDownloadMutation.mutate(librarySummary)
+              }
+            }}
+            onFilterChange={(filter) => {
+              setTaskFilter(filter)
+              setTaskPage(1)
+            }}
+            onPageChange={changeTaskPage}
+            onClearAll={() => {
+              if (selectedBatch) {
+                setPendingDelete({
+                  taskIDs: [],
+                  scope: 'all',
+                  batchID: selectedBatch.batch_id,
+                  totalCount: selectedBatch.total_count,
+                })
+                return
+              }
               setPendingDelete({
-                taskIDs: clearableTasks.map((task) => task.task_id),
+                taskIDs: [],
                 scope: 'all',
+                library: true,
+                totalCount: librarySummary?.total_count ?? 0,
               })
-            }
+            }}
+            onClearFailed={() => {
+              const failureCount =
+                selectedBatch?.failure_count ??
+                librarySummary?.failure_count ??
+                0
+              if (failureCount <= 0) return
+              setPendingDelete({
+                taskIDs: [],
+                scope: 'failed',
+                batchID: selectedBatch?.batch_id,
+                library: !selectedBatch,
+                totalCount: failureCount,
+              })
+            }}
             onReuse={(task) => applyDraft(valuesFromTask(task))}
             onUseAsReference={(task, image) =>
               void handleUseAsReference(task, image)
@@ -485,33 +808,59 @@ export function ImageStudio() {
       <AlertDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => {
-          if (!open && !deleteMutation.isPending) setPendingDelete(null)
+          if (
+            !open &&
+            !deleteMutation.isPending &&
+            !batchDeleteMutation.isPending &&
+            !libraryDeleteMutation.isPending &&
+            !failedCleanupMutation.isPending
+          ) {
+            setPendingDelete(null)
+          }
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pendingDelete?.scope === 'all'
-                ? t('Clear all')
-                : t('Delete result')}
-            </AlertDialogTitle>
+            <AlertDialogTitle>{pendingDeleteTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingDelete?.scope === 'all'
-                ? t(
-                    'Delete {{count}} finished tasks and their stored images? Running tasks will be kept. This cannot be undone.',
-                    { count: pendingDelete.taskIDs.length }
-                  )
-                : t('Delete this completed task and its stored images?')}
+              {pendingDeleteDescription}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteMutation.isPending}>
+            <AlertDialogCancel
+              disabled={
+                deleteMutation.isPending ||
+                batchDeleteMutation.isPending ||
+                libraryDeleteMutation.isPending ||
+                failedCleanupMutation.isPending
+              }
+            >
               {t('Cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
-              disabled={deleteMutation.isPending}
+              disabled={
+                deleteMutation.isPending ||
+                batchDeleteMutation.isPending ||
+                libraryDeleteMutation.isPending ||
+                failedCleanupMutation.isPending
+              }
               onClick={() => {
                 if (!pendingDelete) return
+                if (pendingDelete.scope === 'failed') {
+                  failedCleanupMutation.mutate({
+                    batchID: pendingDelete.batchID,
+                    count: pendingDelete.totalCount ?? 0,
+                  })
+                  return
+                }
+                if (pendingDelete.library) {
+                  libraryDeleteMutation.mutate()
+                  return
+                }
+                if (pendingDelete.batchID) {
+                  batchDeleteMutation.mutate(pendingDelete.batchID)
+                  return
+                }
                 setDeletingTaskID(
                   pendingDelete.scope === 'single'
                     ? pendingDelete.taskIDs[0]
@@ -520,10 +869,13 @@ export function ImageStudio() {
                 deleteMutation.mutate(pendingDelete.taskIDs)
               }}
             >
-              {deleteMutation.isPending ? (
+              {deleteMutation.isPending ||
+              batchDeleteMutation.isPending ||
+              libraryDeleteMutation.isPending ||
+              failedCleanupMutation.isPending ? (
                 <Spinner data-icon='inline-start' />
               ) : null}
-              {pendingDelete?.scope === 'all' ? t('Clear all') : t('Delete')}
+              {pendingDeleteActionLabel}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

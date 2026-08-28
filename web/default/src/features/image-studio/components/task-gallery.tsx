@@ -60,8 +60,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatQuota } from '@/lib/format'
+import { getPageNumbers } from '@/lib/utils'
 
-import type { ImageStudioImage, NormalizedImageStudioTask } from '../types'
+import type {
+  ImageStudioBatchSummary,
+  ImageStudioImage,
+  ImageStudioLibrarySummary,
+  ImageStudioTaskFilter,
+  NormalizedImageStudioTask,
+} from '../types'
 import {
   activeTaskElapsedSeconds,
   formatTaskTime,
@@ -74,16 +81,20 @@ import {
   taskStatusKey,
 } from '../utils'
 
-type TaskFilter = 'all' | 'active' | 'completed' | 'failed'
-
 type TaskGalleryProps = {
   tasks: NormalizedImageStudioTask[]
   retentionDays: number
-  activeBatchID?: string
+  activeBatch?: ImageStudioBatchSummary
+  librarySummary?: ImageStudioLibrarySummary
+  filter: ImageStudioTaskFilter
+  page: number
+  pageSize: number
+  total: number
   isLoading: boolean
   isRefreshing: boolean
   isDownloading: boolean
   isClearing: boolean
+  isClearingFailed?: boolean
   deletingTaskID: string | null
   onRefresh: () => void
   onDelete: (taskID: string) => void
@@ -92,8 +103,11 @@ type TaskGalleryProps = {
     image: ImageStudioImage,
     index: number
   ) => void
-  onDownloadBatch: (tasks: NormalizedImageStudioTask[]) => void
-  onClearAll: (tasks: NormalizedImageStudioTask[]) => void
+  onDownloadScope?: () => void
+  onFilterChange: (filter: ImageStudioTaskFilter) => void
+  onPageChange: (page: number) => void
+  onClearAll: () => void
+  onClearFailed?: () => void
   onReuse: (task: NormalizedImageStudioTask) => void
   onUseAsReference: (
     task: NormalizedImageStudioTask,
@@ -108,13 +122,6 @@ function statusVariant(
   if (status === 'FAILURE') return 'destructive'
   if (status === 'SUCCESS') return 'outline'
   return 'secondary'
-}
-
-function matchesFilter(task: NormalizedImageStudioTask, filter: TaskFilter) {
-  if (filter === 'active') return isActiveTask(task)
-  if (filter === 'completed') return task.status === 'SUCCESS'
-  if (filter === 'failed') return task.status === 'FAILURE'
-  return true
 }
 
 const SKELETON_KEYS = ['first', 'second', 'third', 'fourth']
@@ -183,39 +190,41 @@ function TaskImage(props: {
 
 export function TaskGallery(props: TaskGalleryProps) {
   const { t } = useTranslation()
-  const [filter, setFilter] = useState<TaskFilter>('all')
   const [preview, setPreview] = useState<{
     task: NormalizedImageStudioTask
     image: ImageStudioImage
     index: number
   } | null>(null)
-  const visibleTasks = props.tasks.filter((task) => matchesFilter(task, filter))
-  const activeTasks = props.activeBatchID
-    ? props.tasks.filter(
-        (task) =>
-          task.request.batch_id === props.activeBatchID ||
-          task.task_id === props.activeBatchID
-      )
-    : []
-  const activeCompleted = activeTasks.filter(isTerminalTask).length
-  const downloadableActiveTasks = activeTasks.filter(
-    (task) => task.status === 'SUCCESS' && Boolean(task.images[0]?.download_url)
-  )
-  const downloadableTasks = props.tasks.filter(
-    (task) => task.status === 'SUCCESS' && Boolean(task.images[0]?.download_url)
-  )
+  const scopeSummary = props.activeBatch ?? props.librarySummary
+  const activeCompleted =
+    scopeSummary?.finished_count ?? props.tasks.filter(isTerminalTask).length
+  const activeTotal = scopeSummary?.total_count ?? props.tasks.length
   const clearableTasks = props.tasks.filter(isTerminalTask)
-  const activeBatchDownloadReady =
-    activeTasks.length > 0 &&
-    activeCompleted === activeTasks.length &&
-    downloadableActiveTasks.length > 0
+  const clearAllCount = scopeSummary?.total_count ?? clearableTasks.length
+  const clearAllAvailable = scopeSummary
+    ? scopeSummary.total_count > 0 &&
+      scopeSummary.finished_count === scopeSummary.total_count
+    : clearableTasks.length > 0
+  const scopeDownloadReady = (scopeSummary?.success_count ?? 0) > 0
+  const failureCount =
+    scopeSummary?.failure_count ??
+    props.tasks.filter((task) => task.status === 'FAILURE').length
   const activeProgress =
-    activeTasks.length > 0
-      ? Math.round(
-          activeTasks.reduce((total, task) => total + taskProgress(task), 0) /
-            activeTasks.length
-        )
-      : 0
+    props.activeBatch?.progress ??
+    (activeTotal > 0 ? Math.round((activeCompleted / activeTotal) * 100) : 0)
+  const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize))
+  const pageNumbers = getPageNumbers(props.page, totalPages)
+  let ellipsisCount = 0
+  const paginationItems = pageNumbers.map((value) => ({
+    key:
+      typeof value === 'number'
+        ? `page-${value}`
+        : `ellipsis-${++ellipsisCount}`,
+    value,
+  }))
+  const firstVisible =
+    props.total > 0 ? (props.page - 1) * props.pageSize + 1 : 0
+  const lastVisible = Math.min(props.page * props.pageSize, props.total)
 
   let gallery: ReactNode
   if (props.isLoading) {
@@ -226,7 +235,7 @@ export function TaskGallery(props: TaskGalleryProps) {
         ))}
       </div>
     )
-  } else if (visibleTasks.length === 0) {
+  } else if (props.tasks.length === 0) {
     gallery = (
       <Empty className='min-h-72 border'>
         <EmptyHeader>
@@ -234,12 +243,12 @@ export function TaskGallery(props: TaskGalleryProps) {
             <HugeiconsIcon icon={AiImageIcon} strokeWidth={1.8} />
           </EmptyMedia>
           <EmptyTitle>
-            {filter === 'all'
+            {props.filter === 'all'
               ? t('No creations yet')
               : t('No matching creations')}
           </EmptyTitle>
           <EmptyDescription>
-            {filter === 'all'
+            {props.filter === 'all'
               ? t('Generated images will appear here.')
               : t('Try another status filter.')}
           </EmptyDescription>
@@ -249,7 +258,7 @@ export function TaskGallery(props: TaskGalleryProps) {
   } else {
     gallery = (
       <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-3'>
-        {visibleTasks.map((task) => {
+        {props.tasks.map((task) => {
           const request = task.request
           const image = task.images[0]
           const isDeleting = props.deletingTaskID === task.task_id
@@ -425,40 +434,54 @@ export function TaskGallery(props: TaskGalleryProps) {
       className='flex min-w-0 flex-col gap-5 p-5'
       aria-labelledby='studio-results-title'
     >
-      {activeTasks.length > 0 ? (
+      {activeTotal > 0 ? (
         <Card size='sm'>
           <CardHeader>
-            <CardTitle>{t('Current batch')}</CardTitle>
+            <CardTitle>
+              {props.activeBatch ? t('Current batch') : t('All creations')}
+            </CardTitle>
             <CardDescription aria-live='polite'>
               {t('{{completed}} of {{total}} tasks finished', {
                 completed: activeCompleted,
-                total: activeTasks.length,
+                total: activeTotal,
               })}
             </CardDescription>
             <CardAction>
               <Badge
                 variant={
-                  activeCompleted === activeTasks.length
-                    ? 'outline'
-                    : 'secondary'
+                  activeCompleted === activeTotal ? 'outline' : 'secondary'
                 }
               >
                 {activeProgress}%
               </Badge>
             </CardAction>
           </CardHeader>
-          <CardContent>
+          <CardContent className='flex flex-col gap-2'>
             <Progress value={activeProgress} />
+            {scopeSummary ? (
+              <div className='text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                <span>
+                  {t('Completed')}: {scopeSummary.success_count}
+                </span>
+                <span>
+                  {t('Failed')}: {scopeSummary.failure_count}
+                </span>
+                <span>
+                  {t('In progress')}: {scopeSummary.active_count}
+                </span>
+                <span>
+                  {t('Waiting')}: {scopeSummary.queued_count}
+                </span>
+              </div>
+            ) : null}
           </CardContent>
           <CardFooter className='justify-end'>
             <Button
               size='sm'
               disabled={
-                !activeBatchDownloadReady ||
-                props.isDownloading ||
-                props.isClearing
+                !scopeDownloadReady || props.isDownloading || props.isClearing
               }
-              onClick={() => props.onDownloadBatch(downloadableActiveTasks)}
+              onClick={props.onDownloadScope}
             >
               {props.isDownloading ? (
                 <Spinner data-icon='inline-start' />
@@ -469,7 +492,7 @@ export function TaskGallery(props: TaskGalleryProps) {
                   data-icon='inline-start'
                 />
               )}
-              {t('Download all')}
+              {t('Download all')} ({scopeSummary?.success_count ?? 0})
             </Button>
           </CardFooter>
         </Card>
@@ -492,17 +515,24 @@ export function TaskGallery(props: TaskGalleryProps) {
                 )
               : t('Images are stored locally until you delete them.')}
           </p>
+          {props.total > 0 ? (
+            <p className='text-muted-foreground/80 mt-1 text-xs'>
+              {t('Showing {{first}}–{{last}} of {{total}} results.', {
+                first: firstVisible,
+                last: lastVisible,
+                total: props.total,
+              })}
+            </p>
+          ) : null}
         </div>
         <div className='flex flex-wrap gap-2'>
           <Button
             variant='outline'
             size='sm'
             disabled={
-              downloadableTasks.length === 0 ||
-              props.isDownloading ||
-              props.isClearing
+              !scopeDownloadReady || props.isDownloading || props.isClearing
             }
-            onClick={() => props.onDownloadBatch(downloadableTasks)}
+            onClick={props.onDownloadScope}
           >
             {props.isDownloading ? (
               <Spinner data-icon='inline-start' />
@@ -513,29 +543,52 @@ export function TaskGallery(props: TaskGalleryProps) {
                 data-icon='inline-start'
               />
             )}
-            {t('Download all')} ({downloadableTasks.length})
+            {t('Download all')} ({scopeSummary?.success_count ?? 0})
           </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            disabled={
-              clearableTasks.length === 0 ||
-              props.isClearing ||
-              props.isDownloading
-            }
-            onClick={() => props.onClearAll(clearableTasks)}
-          >
-            {props.isClearing ? (
-              <Spinner data-icon='inline-start' />
-            ) : (
-              <HugeiconsIcon
-                icon={Delete02Icon}
-                strokeWidth={2}
-                data-icon='inline-start'
-              />
-            )}
-            {t('Clear all')} ({clearableTasks.length})
-          </Button>
+          {props.filter === 'failed' ? (
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={
+                failureCount === 0 ||
+                props.isClearing ||
+                props.isClearingFailed ||
+                props.isDownloading
+              }
+              onClick={props.onClearFailed}
+            >
+              {props.isClearingFailed ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <HugeiconsIcon
+                  icon={Delete02Icon}
+                  strokeWidth={2}
+                  data-icon='inline-start'
+                />
+              )}
+              {t('Clear failed tasks')} ({failureCount})
+            </Button>
+          ) : (
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={
+                !clearAllAvailable || props.isClearing || props.isDownloading
+              }
+              onClick={props.onClearAll}
+            >
+              {props.isClearing ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <HugeiconsIcon
+                  icon={Delete02Icon}
+                  strokeWidth={2}
+                  data-icon='inline-start'
+                />
+              )}
+              {t('Clear all')} ({clearAllCount})
+            </Button>
+          )}
           <Button variant='outline' size='sm' onClick={props.onRefresh}>
             {props.isRefreshing ? (
               <Spinner data-icon='inline-start' />
@@ -552,18 +605,91 @@ export function TaskGallery(props: TaskGalleryProps) {
       </div>
 
       <Tabs
-        value={filter}
-        onValueChange={(value) => setFilter(value as TaskFilter)}
+        value={props.filter}
+        onValueChange={(value) =>
+          props.onFilterChange(value as ImageStudioTaskFilter)
+        }
       >
         <TabsList className='grid w-full grid-cols-4 sm:w-auto'>
-          <TabsTrigger value='all'>{t('All')}</TabsTrigger>
-          <TabsTrigger value='active'>{t('In progress')}</TabsTrigger>
-          <TabsTrigger value='completed'>{t('Completed')}</TabsTrigger>
-          <TabsTrigger value='failed'>{t('Failed')}</TabsTrigger>
+          <TabsTrigger value='all'>
+            {t('All')}
+            <span className='hidden sm:inline'>
+              {' '}
+              ({scopeSummary?.total_count ?? props.total})
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value='active'>
+            {t('In progress')}
+            <span className='hidden sm:inline'>
+              {' '}
+              (
+              {(scopeSummary?.active_count ?? 0) +
+                (scopeSummary?.queued_count ?? 0)}
+              )
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value='completed'>
+            {t('Completed')}
+            <span className='hidden sm:inline'>
+              {' '}
+              ({scopeSummary?.success_count ?? 0})
+            </span>
+          </TabsTrigger>
+          <TabsTrigger value='failed'>
+            {t('Failed')}
+            <span className='hidden sm:inline'> ({failureCount})</span>
+          </TabsTrigger>
         </TabsList>
       </Tabs>
 
       {gallery}
+      {props.total > 0 && totalPages > 1 ? (
+        <div className='flex items-center justify-between gap-2'>
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={props.page <= 1 || props.isLoading}
+            onClick={() => props.onPageChange(props.page - 1)}
+          >
+            {t('Previous')}
+          </Button>
+          <span className='text-muted-foreground text-sm sm:hidden'>
+            {props.page} / {totalPages}
+          </span>
+          <div className='hidden items-center gap-1 sm:flex'>
+            {paginationItems.map((item) =>
+              typeof item.value === 'number' ? (
+                <Button
+                  key={item.key}
+                  variant={item.value === props.page ? 'secondary' : 'outline'}
+                  size='sm'
+                  className='min-w-9 px-2'
+                  disabled={props.isLoading}
+                  aria-current={item.value === props.page ? 'page' : undefined}
+                  onClick={() => props.onPageChange(item.value as number)}
+                >
+                  {item.value}
+                </Button>
+              ) : (
+                <span
+                  key={item.key}
+                  className='text-muted-foreground px-2 text-sm'
+                >
+                  …
+                </span>
+              )
+            )}
+          </div>
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={props.page >= totalPages || props.isLoading}
+            onClick={() => props.onPageChange(props.page + 1)}
+          >
+            {t('Next')}
+          </Button>
+        </div>
+      ) : null}
 
       <Dialog
         open={preview !== null}

@@ -105,6 +105,8 @@ type StudioFormProps = {
   selectedModel: string
   initialValues?: Partial<ImageStudioFormValues>
   initialFiles?: File[]
+  maxBatchSize: number
+  interactiveBatchLimit: number
   isLoadingOptions: boolean
   optionsError?: 'groups' | 'models'
   isSubmitting: boolean
@@ -143,7 +145,7 @@ export function StudioForm(props: StudioFormProps) {
     selectedModel !== '' &&
     Number.isInteger(count) &&
     count >= 1 &&
-    count <= 10
+    count <= props.maxBatchSize
   const estimateQuery = useQuery({
     queryKey: [
       'image-studio',
@@ -163,7 +165,7 @@ export function StudioForm(props: StudioFormProps) {
           group: selectedGroup,
           model: selectedModel,
           prompt: debouncedPrompt,
-          n: count,
+          count,
           size: size === 'default' ? '' : size,
           quality: quality === 'default' ? '' : quality,
         },
@@ -627,17 +629,26 @@ export function StudioForm(props: StudioFormProps) {
                   id='image-studio-count'
                   type='number'
                   min={1}
-                  max={10}
+                  max={props.maxBatchSize}
                   aria-invalid={Boolean(form.formState.errors.count)}
                   {...form.register('count', { valueAsNumber: true })}
                 />
                 <FieldError>
                   {form.formState.errors.count
-                    ? t('Count must be between 1 and 10.')
+                    ? t('Count must be between 1 and {{count}}.', {
+                        count: props.maxBatchSize,
+                      })
                     : null}
                 </FieldError>
               </Field>
             </div>
+            {Number.isInteger(count) && count > props.interactiveBatchLimit ? (
+              <FieldDescription>
+                {t(
+                  'Large batches run in the background with fair scheduling. You can leave this page and return later.'
+                )}
+              </FieldDescription>
+            ) : null}
             {selectedSizePreset ? (
               <FieldDescription>
                 {t('Actual output: {{width}} × {{height}}', {
