@@ -14,11 +14,16 @@ func ClaimNextImageStudioTask() (*Task, error) {
 	var claimed *Task
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var tasks []Task
+		// Keep the batch gate in a correlated NOT EXISTS subquery instead of
+		// joining it into the lock target. PostgreSQL rejects a bare FOR UPDATE
+		// when the selected relation contains the nullable side of an outer join.
+		submittingBatch := tx.Table("image_studio_batch_items AS studio_items").
+			Select("1").
+			Joins("JOIN image_studio_batches AS studio_batches ON studio_batches.id = studio_items.batch_db_id").
+			Where("studio_items.task_db_id = tasks.id AND studio_batches.status = ?", ImageStudioBatchStatusSubmitting)
 		if err := lockForUpdate(tx).
-			Joins("LEFT JOIN image_studio_batch_items AS studio_items ON studio_items.task_db_id = tasks.id").
-			Joins("LEFT JOIN image_studio_batches AS studio_batches ON studio_batches.id = studio_items.batch_db_id").
 			Where("tasks.platform = ? AND tasks.status = ?", constant.TaskPlatformImageStudio, TaskStatusQueued).
-			Where("studio_items.id IS NULL OR studio_batches.status <> ?", ImageStudioBatchStatusSubmitting).
+			Where("NOT EXISTS (?)", submittingBatch).
 			Order("tasks.queue_priority DESC, tasks.submit_time, tasks.id").
 			Limit(1).
 			Find(&tasks).Error; err != nil {
