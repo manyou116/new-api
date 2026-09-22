@@ -184,15 +184,10 @@ export function SubscriptionsMutateDrawer({
   }
 
   // Mints a Pancake OnetimeProduct (not SubscriptionProduct — see
-  // controller) using persisted creds + the form's title/price, then
+  // controller) using persisted creds + the form's price, then
   // pins the returned PROD_ ID into the form field.
   const handleCreatePancakeProduct = async () => {
-    const title = form.getValues('title').trim()
     const priceAmount = Number(form.getValues('price_amount') || 0)
-    if (!title) {
-      toast.error(t('Plan title is required'))
-      return
-    }
     if (priceAmount <= 0) {
       toast.error(t('Plan price must be greater than zero'))
       return
@@ -200,7 +195,6 @@ export function SubscriptionsMutateDrawer({
     setCreatingPancakeProduct(true)
     try {
       const res = await createWaffoPancakeSubscriptionProduct({
-        name: title,
         amount: priceAmount.toFixed(2),
       })
       if (
