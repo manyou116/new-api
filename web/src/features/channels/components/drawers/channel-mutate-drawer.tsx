@@ -51,6 +51,7 @@ import {
   useRef,
 } from 'react'
 import { type SubmitErrorHandler, useForm } from 'react-hook-form'
+import { Sub2APIIdentitySetting } from '../sub2api-identity-setting'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -2791,6 +2792,7 @@ export function ChannelMutateDrawer({
           )}
         />
 
+        <Sub2APIIdentitySetting disabled={sensitiveLocked || isSubmitting} />
         <RequestCompressionSetting disabled={sensitiveLocked || isSubmitting} />
         <FormField
           control={form.control}
