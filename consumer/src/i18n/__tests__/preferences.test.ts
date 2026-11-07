@@ -13,11 +13,11 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
-it('uses the browser language when the deployment has no default', async () => {
+it('defaults to Chinese even when the browser is French', async () => {
   vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['fr-FR'])
   const { default: language } = await import('../index')
-  await waitFor(() => expect(language.resolvedLanguage).toBe('fr'))
-  expect(document.documentElement.lang).toBe('fr')
+  await waitFor(() => expect(language.resolvedLanguage).toBe('zh'))
+  expect(document.documentElement.lang).toBe('zh-CN')
 })
 
 it('uses the configured Chinese default even when the browser is English', async () => {
@@ -56,34 +56,34 @@ it('prefers the current saved selection over a legacy selection', async () => {
 })
 
 it.each(['invalid-locale', 'constructor', 'toString', '__proto__'])(
-  'ignores unsupported saved and configured language %s and falls back to English',
+  'ignores unsupported saved and configured language %s and falls back to Chinese',
   async (unsupported) => {
     vi.stubEnv('PUBLIC_DEFAULT_LANGUAGE', unsupported)
     localStorage.setItem('new-api-consumer:language', unsupported)
     vi.spyOn(navigator, 'language', 'get').mockReturnValue('de-DE')
     vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['de-DE'])
     const { default: language } = await import('../index')
-    await waitFor(() => expect(language.resolvedLanguage).toBe('en'))
+    await waitFor(() => expect(language.resolvedLanguage).toBe('zh'))
   },
 )
 
-it('retains the Traditional Chinese browser locale', async () => {
+it('uses the Chinese default before the browser locale', async () => {
   vi.spyOn(navigator, 'language', 'get').mockReturnValue('zh-TW')
   vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-TW'])
   const { default: language } = await import('../index')
-  await waitFor(() => expect(language.resolvedLanguage).toBe('zh-TW'))
-  expect(document.documentElement.lang).toBe('zh-TW')
+  await waitFor(() => expect(language.resolvedLanguage).toBe('zh'))
+  expect(document.documentElement.lang).toBe('zh-CN')
 })
 
 it.each([
   { browser: ['zh-CN', 'en'], expected: 'zh' },
   { browser: ['zh-Hans-CN', 'en-US', 'en'], expected: 'zh' },
-  { browser: ['zh-Hant-TW', 'en'], expected: 'zh-TW' },
-  { browser: ['zh-HK', 'en'], expected: 'zh-TW' },
+  { browser: ['zh-Hant-TW', 'en'], expected: 'zh' },
+  { browser: ['zh-HK', 'en'], expected: 'zh' },
   { browser: ['zh-Hans-HK', 'en'], expected: 'zh' },
-  { browser: ['en-GB', 'zh'], expected: 'en' },
+  { browser: ['en-GB', 'zh'], expected: 'zh' },
   { browser: ['de-DE', 'zh-CN', 'en'], expected: 'zh' },
-])('respects the first supported browser preference in $browser', async ({ browser, expected }) => {
+])('defaults to Chinese for browser preferences $browser', async ({ browser, expected }) => {
   vi.spyOn(navigator, 'languages', 'get').mockReturnValue(browser)
   vi.spyOn(navigator, 'language', 'get').mockReturnValue(browser[0])
   const { default: language } = await import('../index')

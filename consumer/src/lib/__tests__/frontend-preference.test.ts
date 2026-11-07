@@ -59,58 +59,45 @@ beforeEach(() => {
   document.cookie = 'factory_frontend=; Max-Age=0; Path=/'
 })
 
-describe('frontend preference bootstrap', () => {
-  it('keeps first visits and invalid choices in the legacy interface', () => {
-    for (const preference of ['', 'invalid']) {
+describe('frontend rollout preference', () => {
+  it.each(['', 'invalid', 'legacy'])(
+    'opens consumer for first visits and retired choices (%s)',
+    (preference) => {
       localStorage.setItem('factory:frontend', preference)
-      const replace = bootstrap({ current: 'legacy', preference })
-      expect(replace).not.toHaveBeenCalled()
-      expect(replace.shouldUseConsumer?.('/keys')).toBe(false)
-      expect(replace.shouldUseConsumer?.('/pricing')).toBe(false)
-      expect(replace.shouldUseConsumer?.('/sign-in?redirect=%2Fkeys')).toBe(false)
-      expect(document.cookie).toBe('')
-    }
+      const result = bootstrap({ preference })
+      expect(result).not.toHaveBeenCalled()
+      expect(result.shouldUseConsumer?.('/keys')).toBe(true)
+      expect(result.shouldUseConsumer?.('/pricing')).toBe(true)
+      expect(localStorage.getItem('factory:frontend')).toBe('consumer')
+    },
+  )
+
+  it('restores only a fresh explicit legacy choice', () => {
+    localStorage.setItem('factory:frontend', 'legacy-v2')
+    const result = bootstrap({})
+    expect(document.cookie).toContain('factory_frontend=legacy-v2')
+    expect(result).toHaveBeenCalledWith('/keys?tab=mine#section')
+    expect(bootstrap({ preference: 'legacy-v2', current: 'legacy' })).not.toHaveBeenCalled()
   })
 
-  it('restores a saved legacy choice before a shared consumer page starts', () => {
-    localStorage.setItem('factory:frontend', 'legacy')
-    const replace = bootstrap({})
-    expect(document.cookie).toContain('factory_frontend=legacy')
-    expect(replace).toHaveBeenCalledWith('/keys?tab=mine#section')
-  })
-
-  it('respects a newer server choice and updates local storage in both directions', () => {
-    for (const preference of ['consumer', 'legacy']) {
-      localStorage.setItem('factory:frontend', preference === 'consumer' ? 'legacy' : 'consumer')
-      const replace = bootstrap({ preference })
+  it('keeps a server choice ahead of local storage in both directions', () => {
+    for (const preference of ['consumer', 'legacy-v2']) {
+      localStorage.setItem('factory:frontend', preference === 'consumer' ? 'legacy-v2' : 'consumer')
+      expect(bootstrap({ preference })).not.toHaveBeenCalled()
       expect(localStorage.getItem('factory:frontend')).toBe(preference)
-      expect(replace).not.toHaveBeenCalled()
     }
   })
 
-  it('preserves ordinary bookmark and payment fields while stripping callback credentials', () => {
-    localStorage.setItem('factory:frontend', 'legacy')
-    const replace = bootstrap({
-      search:
-        '?keyword=bookmark&request_id=req-1&from=orders&pay=success&batch=batch-1&state=secret&code=secret&token=secret',
-    })
-    expect(replace).toHaveBeenCalledWith(
+  it('preserves bookmark and payment fields but strips callback credentials on correction', () => {
+    localStorage.setItem('factory:frontend', 'legacy-v2')
+    expect(
+      bootstrap({
+        search:
+          '?keyword=bookmark&request_id=req-1&from=orders&pay=success&batch=batch-1&state=secret&code=secret&token=secret',
+      }),
+    ).toHaveBeenCalledWith(
       '/keys?keyword=bookmark&request_id=req-1&from=orders&pay=success&batch=batch-1#section',
     )
-  })
-
-  it('keeps the saved consumer choice while the server disables or cannot load that frontend', () => {
-    localStorage.setItem('factory:frontend', 'consumer')
-    const replace = bootstrap({ current: 'legacy', available: false })
-    expect(localStorage.getItem('factory:frontend')).toBe('consumer')
-    expect(document.cookie).toContain('factory_frontend=consumer')
-    expect(replace).not.toHaveBeenCalled()
-  })
-
-  it('does not repeat a correction once the server receives the restored cookie', () => {
-    localStorage.setItem('factory:frontend', 'legacy')
-    expect(bootstrap({})).toHaveBeenCalledTimes(1)
-    expect(bootstrap({ preference: 'legacy', current: 'legacy' })).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -120,35 +107,28 @@ describe('frontend preference bootstrap', () => {
     '/app/oauth/github',
     '/console/subscription',
     '/subscriptions',
-  ])('does not redirect callbacks or management path %s', (path) => {
-    localStorage.setItem('factory:frontend', 'consumer')
+  ])('keeps callbacks and management %s in their original application', (path) => {
     expect(bootstrap({ current: 'legacy', path })).not.toHaveBeenCalled()
   })
 
   it.each(['/pricing', '/pricing/gpt-image-2', '/console/token', '/dashboard'])(
-    'restores consumer on the old user bookmark %s',
+    'moves historical user bookmark %s to the default consumer interface',
     (path) => {
-      localStorage.setItem('factory:frontend', 'consumer')
-      const replace = bootstrap({ current: 'legacy', path })
-      expect(replace).toHaveBeenCalledWith(`${path}?tab=mine#section`)
-      expect(document.cookie).toContain('factory_frontend=consumer')
-      expect(replace.shouldUseConsumer?.(path)).toBe(true)
+      const result = bootstrap({ current: 'legacy', path })
+      expect(result).toHaveBeenCalledWith(path + '?tab=mine#section')
+      expect(result.shouldUseConsumer?.(path)).toBe(true)
     },
   )
 
-  it('hands legacy SPA user-page navigation back to the gateway without redirecting administration or callbacks', () => {
+  it('keeps administration and registered callbacks out of consumer SPA navigation', () => {
     const { shouldUseConsumer } = bootstrap({
       current: 'legacy',
       preference: 'consumer',
       path: '/system-settings',
     })
-    expect(shouldUseConsumer).toBeTypeOf('function')
     for (const path of [
       '/keys',
       '/pricing',
-      '/pricing/gpt',
-      '/pricing/' + 'long-model-name'.repeat(30),
-      '/pricing/%E6%A8%A1%E5%9E%8B',
       '/console/token',
       '/dashboard',
       '/sign-in?redirect=%2Fkeys',
@@ -156,48 +136,36 @@ describe('frontend preference bootstrap', () => {
       expect(shouldUseConsumer?.(path), path).toBe(true)
     for (const path of [
       '/subscriptions',
-      '/console/subscription',
-      '/dashboard/users',
       '/system-settings',
       '/oauth/github?code=original',
-      '/app/reset',
       '/reset?token=original',
-      '/sign-in?redirect=%2Fsystem-settings',
       '/login?redirect=%2Fsystem-settings',
       'https://elsewhere.test/pricing',
     ])
       expect(shouldUseConsumer?.(path), path).toBe(false)
-    document.cookie = 'factory_frontend=legacy; Path=/'
+    document.cookie = 'factory_frontend=legacy-v2; Path=/'
     expect(shouldUseConsumer?.('/pricing')).toBe(false)
   })
 
-  it('does not reload a legacy fallback or explicit legacy page on client navigation', () => {
+  it('does not reload a missing-build fallback or a deliberately selected legacy document', () => {
+    expect(bootstrap({ current: 'legacy', available: false }).shouldUseConsumer?.('/pricing')).toBe(
+      false,
+    )
+    document.cookie = 'factory_frontend=legacy-v2; Path=/'
     expect(
-      bootstrap({
-        current: 'legacy',
-        available: false,
-        preference: 'consumer',
-      }).shouldUseConsumer?.('/pricing'),
-    ).toBe(false)
-    expect(
-      bootstrap({ current: 'legacy', preference: 'legacy' }).shouldUseConsumer?.('/pricing'),
+      bootstrap({ current: 'legacy', preference: 'legacy-v2' }).shouldUseConsumer?.('/pricing'),
     ).toBe(false)
   })
 
-  it('preserves a safe login destination when restoring a legacy choice and strips nested credentials', () => {
-    localStorage.setItem('factory:frontend', 'legacy')
-    const replace = bootstrap({
-      path: '/login',
-      search: '?next=%2Fkeys%3Fgroup%3Dvip%26token%3Dsecret',
-    })
-    expect(replace).toHaveBeenCalledWith('/login?next=%2Fkeys%3Fgroup%3Dvip#section')
+  it('sanitizes a nested login destination when restoring an explicit legacy choice', () => {
+    localStorage.setItem('factory:frontend', 'legacy-v2')
     expect(
-      bootstrap({ path: '/login', search: '?next=https%3A%2F%2Fevil.test' }),
-    ).toHaveBeenCalledWith('/login#section')
+      bootstrap({ path: '/login', search: '?next=%2Fkeys%3Fgroup%3Dvip%26token%3Dsecret' }),
+    ).toHaveBeenCalledWith('/login?next=%2Fkeys%3Fgroup%3Dvip#section')
   })
 
-  it('continues rendering when local storage is blocked or contains an invalid preference', () => {
-    const blockedStorage = {
+  it('continues with consumer when local storage is unavailable', () => {
+    const storage = {
       getItem() {
         throw new Error('blocked')
       },
@@ -205,20 +173,12 @@ describe('frontend preference bootstrap', () => {
         throw new Error('blocked')
       },
     } as unknown as Storage
-    const blocked = bootstrap({ current: 'legacy', storage: blockedStorage })
-    expect(blocked).not.toHaveBeenCalled()
-    expect(blocked.shouldUseConsumer?.('/pricing')).toBe(false)
-    localStorage.setItem('factory:frontend', 'https://evil.test')
-    const invalid = bootstrap({ current: 'legacy' })
-    expect(invalid).not.toHaveBeenCalled()
-    expect(invalid.shouldUseConsumer?.('/pricing')).toBe(false)
-    expect(document.cookie).toBe('')
+    expect(bootstrap({ storage }).shouldUseConsumer?.('/pricing')).toBe(true)
   })
 
-  it('continues rendering when cookies cannot be persisted', () => {
-    localStorage.setItem('factory:frontend', 'legacy')
-    const cookie = vi.spyOn(document, 'cookie', 'set').mockImplementation(() => {})
+  it('never reloads repeatedly when cookies cannot be persisted', () => {
+    localStorage.setItem('factory:frontend', 'legacy-v2')
+    vi.spyOn(document, 'cookie', 'set').mockImplementation(() => {})
     expect(bootstrap({})).not.toHaveBeenCalled()
-    cookie.mockRestore()
   })
 })

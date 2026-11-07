@@ -8,7 +8,7 @@ import { languages, toIntlLocale } from './src/i18n/languages'
 const siteBrand = resolveSiteBrand()
 const defaultLanguage = languages.some(({ id }) => id === process.env.PUBLIC_DEFAULT_LANGUAGE)
   ? process.env.PUBLIC_DEFAULT_LANGUAGE
-  : 'en'
+  : 'zh'
 const backend = process.env.NEW_API_BACKEND || 'http://127.0.0.1:3000'
 
 export default defineConfig({

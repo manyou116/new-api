@@ -58,10 +58,16 @@ it('lets the chat user collapse and reopen site navigation and remembers the exp
 })
 
 it.each([1, 10, 100])(
-  'shows the workspace legacy link and limits administration to role %s',
+  'offers legacy and administration links only to administrators (role %s)',
   async (role) => {
     session.user.role = role
     await setup('/keys')
+    await screen.findByRole('link', { name: 'API keys' })
+    if (role < 10) {
+      expect(screen.queryByRole('link', { name: 'Switch to legacy' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Administration' })).not.toBeInTheDocument()
+      return
+    }
     const legacyEntry = await screen.findByRole('link', { name: 'Switch to legacy' })
     expect(legacyEntry).toHaveClass('button-ghost')
     expect(screen.queryByText('New interface')).not.toBeInTheDocument()

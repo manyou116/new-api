@@ -30,6 +30,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 
 import { FrontendEntry } from '@/components/layout/components/frontend-entry'
 import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { SettingsPageProvider } from '../../components/settings-page-context'
 import { SystemInfoSection } from '../system-info-section'
@@ -82,6 +83,11 @@ async function renderSettings(enabled = true, available = true) {
 }
 beforeEach(() => {
   localStorage.clear()
+  useAuthStore.getState().auth.setUser({
+    id: 1,
+    username: 'admin-fixture',
+    role: 10,
+  })
   vi.spyOn(api, 'put').mockResolvedValue({ data: { success: true } })
 })
 test('absent option defaults on and saving toggled preference sends its key and refreshes status', async () => {
@@ -100,6 +106,26 @@ test('absent option defaults on and saving toggled preference sends its key and 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['status'] })
   )
 })
+test.each([1, null])(
+  'hides interface switching for ordinary or anonymous viewers (role %s)',
+  async (role) => {
+    useAuthStore.getState().auth.setUser(
+      role === null
+        ? null
+        : {
+            id: 2,
+            username: 'user-fixture',
+            role,
+          }
+    )
+    await renderSettings()
+    expect(
+      screen.queryByRole('link', { name: 'New interface' })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  }
+)
+
 test('failed save keeps the changed setting available to retry', async () => {
   vi.mocked(api.put).mockResolvedValue({
     data: { success: false, message: 'Save rejected' },
@@ -122,9 +148,9 @@ test.each([
   await renderSettings(enabled, available)
   await waitFor(() => expect(api.get).toHaveBeenCalled())
   if (enabled && available) {
-    expect(await screen.findByText('New release')).toBeVisible()
+    expect(screen.queryByText('New release')).not.toBeInTheDocument()
     const entry = await screen.findByRole('link', {
-      name: 'Try the new interface',
+      name: 'New interface',
     })
     expect(entry).toHaveAttribute(
       'href',
@@ -136,7 +162,7 @@ test.each([
     expect(entry).not.toHaveAttribute('tabindex', '-1')
   } else {
     expect(
-      screen.queryByRole('link', { name: 'Try the new interface' })
+      screen.queryByRole('link', { name: 'New interface' })
     ).not.toBeInTheDocument()
   }
   if (!available) {

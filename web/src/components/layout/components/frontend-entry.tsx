@@ -20,14 +20,22 @@ import { ArrowRight01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useStatus } from '@/hooks/use-status'
+import { useAuthStore } from '@/stores/auth-store'
 
 export function FrontendEntry() {
   const { t } = useTranslation()
   const { status } = useStatus()
-  if (!status?.frontend_enabled || !status.frontend_available) return null
+  const user = useAuthStore((state) => state.auth.user)
+  if (
+    !user ||
+    user.role < 10 ||
+    !status?.frontend_enabled ||
+    !status.frontend_available
+  ) {
+    return null
+  }
   // This document navigation lets the server persist the interface preference.
   return (
     <Button
@@ -36,16 +44,10 @@ export function FrontendEntry() {
       variant='default'
       size='lg'
       className='h-10 max-w-full gap-2 rounded-xl px-3 shadow-xs transition-colors active:not-aria-[haspopup]:translate-y-0 motion-reduce:transition-none'
-      aria-label={t('Try the new interface')}
+      aria-label={t('New interface')}
       render={<a href='/frontend/switch?version=consumer&return_to=/' />}
     >
-      <Badge
-        variant='secondary'
-        className='bg-primary-foreground/15 text-primary-foreground hidden border-0 px-1.5 text-[10px] font-medium sm:inline-flex'
-      >
-        {t('New release')}
-      </Badge>
-      <span className='truncate'>{t('Try the new interface')}</span>
+      <span className='truncate'>{t('New interface')}</span>
       <HugeiconsIcon
         icon={ArrowRight01Icon}
         strokeWidth={2}

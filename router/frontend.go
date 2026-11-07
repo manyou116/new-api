@@ -161,7 +161,7 @@ func serveConsumerFrontend(legacyIndex []byte) gin.HandlerFunc {
 		p := c.Request.URL.Path
 		if p == "/frontend/preference.js" {
 			preference, _ := c.Cookie("factory_frontend")
-			if preference != "consumer" && preference != "legacy" {
+			if preference != "consumer" && preference != "legacy-v2" {
 				preference = ""
 			}
 			common.OptionMapRWMutex.RLock()
@@ -211,7 +211,14 @@ func serveConsumerFrontend(legacyIndex []byte) gin.HandlerFunc {
 			}
 			c.Header("Cache-Control", "no-store")
 			c.SetSameSite(http.SameSiteLaxMode)
-			c.SetCookie("factory_frontend", version, 31536000, "/", "", c.Request.TLS != nil, false)
+			// Retire pre-rollout legacy choices without removing the deliberate
+			// legacy navigation used by administrators. This is only a display
+			// preference; API authorization is enforced independently.
+			choice := version
+			if choice == "legacy" {
+				choice = "legacy-v2"
+			}
+			c.SetCookie("factory_frontend", choice, 31536000, "/", "", c.Request.TLS != nil, false)
 			c.Redirect(http.StatusSeeOther, target)
 			c.Abort()
 			return
@@ -325,8 +332,9 @@ func serveConsumerFrontend(legacyIndex []byte) gin.HandlerFunc {
 				target = location.String()
 			}
 		}
-		// The original interface remains the default until the user opts in.
-		useConsumer := enabled && preference == "consumer" && target != ""
+		// New visits and historical user preferences now open the consumer UI.
+		// Only a fresh explicit legacy selection retains the original console.
+		useConsumer := enabled && preference != "legacy-v2" && target != ""
 		var consumerIndex []byte
 		if useConsumer && os.Getenv("CONSUMER_FRONTEND_DIR") != "" {
 			consumerIndex, _ = os.ReadFile(filepath.Join(os.Getenv("CONSUMER_FRONTEND_DIR"), "index.html"))

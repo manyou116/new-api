@@ -9,7 +9,7 @@ const languageDetector = new LanguageDetector()
 languageDetector.addDetector({
   name: 'deploymentDefault',
   lookup() {
-    return toSupportedLanguage(process.env.PUBLIC_DEFAULT_LANGUAGE)
+    return toSupportedLanguage(process.env.PUBLIC_DEFAULT_LANGUAGE) || 'zh'
   },
 })
 languageDetector.addDetector({
@@ -55,7 +55,7 @@ void i18n
     resources: { en, zh },
     partialBundledLanguages: true,
     supportedLngs: languages.map(({ id }) => id),
-    fallbackLng: 'en',
+    fallbackLng: 'zh',
     load: 'currentOnly',
     keySeparator: false,
     nsSeparator: false,

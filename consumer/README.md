@@ -8,9 +8,9 @@
 
 需要单独覆盖时，将 `.env.example` 复制为被 Git 忽略的 `.env.local`，配置 `PUBLIC_SITE_NAME`、`PUBLIC_SITE_DOMAIN`、`PUBLIC_SITE_TITLE`、`PUBLIC_SITE_DESCRIPTION`、`PUBLIC_SITE_LOGO_URL`。这些值只用于展示，会进入浏览器构建产物，不得放入密钥。Logo 支持站内路径、HTTP(S) 图片地址或图片 data URL；未配置或加载失败时显示通用图标。构建后的标题和描述也使用同一套配置。
 
-未配置 `PUBLIC_DEFAULT_LANGUAGE` 时，语言按已保存选择、浏览器语言、英文回退的顺序确定。部署可以设置七种受支持语言之一作为默认值，用户手动选择仍优先；选择保存在 `new-api-consumer:language`，并兼容旧版本的语言偏好。界面统一使用「服务分组」表示模型权限与计费倍率，「套餐」表示可购买的订阅。
+未配置 `PUBLIC_DEFAULT_LANGUAGE` 时默认简体中文，已有手动语言选择仍然保留。部署可以设置七种受支持语言之一作为默认值，用户手动选择仍优先；选择保存在 `new-api-consumer:language`，并兼容旧版本的语言偏好。界面统一使用「服务分组」表示模型权限与计费倍率，「套餐」表示可购买的订阅。
 
-Docker 构建排除私有 `.env.local`，可通过同名 `--build-arg PUBLIC_...` 提供非敏感展示设置，或单独构建 consumer 后挂载静态目录。未提供参数的公共镜像不包含某个部署的专属品牌或固定中文默认值。
+Docker 构建排除私有 `.env.local`，可通过同名 `--build-arg PUBLIC_...` 提供非敏感展示设置，或单独构建 consumer 后挂载静态目录。未提供参数的公共镜像默认简体中文，不包含某个部署的专属品牌。
 
 ## 开发
 
@@ -32,7 +32,7 @@ bun run i18n:sync
 bun run build
 ```
 
-新前端页面使用站点根路径，资源使用 `/_factory/`；发布独立 `consumer/dist/` 到版本目录，Go 设置 `CONSUMER_FRONTEND_DIR` 指向当前目录。`deploy/nginx.conf` 将页面请求交给网关在响应 HTML 前选择界面，不要用 nginx 的统一 SPA fallback 吞掉旧后台或 API。首次启用此入口能力须更新 Go 后端及旧管理界面的开关；以后 consumer 静态发布可独立进行。`FRONTEND_BASE_URL` 应保持未设置，避免绕过本地双界面分流。
+新版已成为普通用户的默认界面，不再显示体验邀请或旧版入口；历史旧版选择会迁移到新版。管理员仍可从新版的旧版入口进入原界面，也可直接访问管理路由。新旧界面选择仅决定页面展示，不改变任何后端权限。新前端页面使用站点根路径，资源使用 `/_factory/`；发布独立 `consumer/dist/` 到版本目录，Go 设置 `CONSUMER_FRONTEND_DIR` 指向当前目录。`deploy/nginx.conf` 将页面请求交给网关在响应 HTML 前选择界面，不要用 nginx 的统一 SPA fallback 吞掉旧后台或 API。首次启用此入口能力须更新 Go 后端及旧管理界面的开关；以后 consumer 静态发布可独立进行。`FRONTEND_BASE_URL` 应保持未设置，避免绕过本地双界面分流。
 
 仓库 Dockerfile 会分别构建两套前端：旧控制台继续 embed，新版静态资源放在 `/opt/new-api/consumer`，镜像默认设置 `CONSUMER_FRONTEND_DIR` 指向该目录。可用只读挂载和环境变量覆盖为独立发布目录。推送 fork 的 `main` 后，`Publish fork image` 先运行后端测试及新版 typecheck、lint、format、i18n、测试和构建，通过后发布 amd64 镜像；不会自动切换线上容器。构建上下文排除本地数据库、环境文件和测试目录。
 

@@ -93,10 +93,11 @@ func TestFrontendRouting(t *testing.T) {
 		status       int
 		body         string
 	}{
-		{"/", "", 200, "legacy"}, {"/", "invalid", 200, "legacy"},
-		{"/", "legacy", 200, "legacy"}, {"/", "consumer", 200, "consumer"},
-		{"/keys", "", 200, "legacy"}, {"/keys", "invalid", 200, "legacy"},
-		{"/keys", "legacy", 200, "legacy"}, {"/keys", "consumer", 200, "consumer"},
+		{"/", "", 200, "consumer"}, {"/", "invalid", 200, "consumer"},
+		{"/", "legacy", 200, "consumer"}, {"/", "consumer", 200, "consumer"},
+		{"/keys", "", 200, "consumer"}, {"/keys", "invalid", 200, "consumer"},
+		{"/keys", "legacy", 200, "consumer"}, {"/keys", "consumer", 200, "consumer"},
+		{"/keys", "legacy-v2", 200, "legacy"},
 		{"/model-pricing?group=vip&model=gpt", "consumer", 200, "consumer"},
 		{"/model-pricing", "consumer", 200, "consumer"},
 		{"/system-settings/billing/payment", "", 200, "legacy"},
@@ -161,11 +162,6 @@ func TestFrontendRouting(t *testing.T) {
 					w := httptest.NewRecorder()
 					r.ServeHTTP(w, req)
 					assert.Empty(t, w.Result().Cookies())
-					if preference != "consumer" {
-						assert.Equal(t, http.StatusOK, w.Code)
-						assert.Equal(t, "legacy", w.Body.String())
-						return
-					}
 					assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
 					assert.Equal(t, tc.target, w.Header().Get("Location"))
 					assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
@@ -231,7 +227,7 @@ func TestFrontendRouting(t *testing.T) {
 			assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
 		}
 	}
-	for _, preference := range []string{"", "consumer", "legacy", "invalid"} {
+	for _, preference := range []string{"", "consumer", "legacy", "legacy-v2", "invalid"} {
 		t.Run("bootstrap preference "+preference, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "https://gateway.test/frontend/preference.js", nil)
 			if preference != "" {
@@ -245,7 +241,7 @@ func TestFrontendRouting(t *testing.T) {
 			assert.Contains(t, w.Header().Get("Vary"), "Cookie")
 			assert.Contains(t, w.Body.String(), `"consumerAvailable":true`)
 			assert.NotContains(t, w.Body.String(), `"/subscriptions":true`)
-			if preference == "consumer" || preference == "legacy" {
+			if preference == "consumer" || preference == "legacy-v2" {
 				assert.Contains(t, w.Body.String(), `"preference":"`+preference+`"`)
 				require.Len(t, w.Result().Cookies(), 1)
 				cookie := w.Result().Cookies()[0]
@@ -260,12 +256,13 @@ func TestFrontendRouting(t *testing.T) {
 		})
 	}
 	for _, tc := range []struct{ path, preference, version string }{
-		{"/keys", "", "legacy"}, {"/keys", "invalid", "legacy"},
-		{"/keys", "consumer", "consumer"}, {"/keys", "legacy", "legacy"},
+		{"/keys", "", "consumer"}, {"/keys", "invalid", "consumer"},
+		{"/keys", "consumer", "consumer"}, {"/keys", "legacy", "consumer"},
+		{"/keys", "legacy-v2", "legacy"},
 		{"/model-pricing", "consumer", "consumer"},
 		{"/app/reset", "legacy", "consumer"},
 		{"/subscriptions", "consumer", "legacy"},
-		{"/index.html", "legacy", "legacy"},
+		{"/index.html", "legacy-v2", "legacy"},
 	} {
 		req := httptest.NewRequest("HEAD", tc.path, nil)
 		req.AddCookie(&http.Cookie{Name: "factory_frontend", Value: tc.preference})
@@ -284,7 +281,7 @@ func TestFrontendRouting(t *testing.T) {
 			for _, source := range []string{"/login?next=%2Fkeys", "/register?next=%2Fwallet", "/reset?email=user%40example.test&token=original", "/reset?email=user%40example.test", "/reset?token=original"} {
 				req := httptest.NewRequest("GET", source, nil)
 				if mode == "legacy preference" {
-					req.AddCookie(&http.Cookie{Name: "factory_frontend", Value: "legacy"})
+					req.AddCookie(&http.Cookie{Name: "factory_frontend", Value: "legacy-v2"})
 				}
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, req)
@@ -295,7 +292,7 @@ func TestFrontendRouting(t *testing.T) {
 			}
 			req := httptest.NewRequest("GET", "/reset", nil)
 			if mode == "legacy preference" {
-				req.AddCookie(&http.Cookie{Name: "factory_frontend", Value: "legacy"})
+				req.AddCookie(&http.Cookie{Name: "factory_frontend", Value: "legacy-v2"})
 			}
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
@@ -314,7 +311,7 @@ func TestFrontendRouting(t *testing.T) {
 		{"/plans?from=orders", "/wallet?from=orders"},
 		{"/model-pricing?group=vip&model=gpt", "/pricing?group=vip&model=gpt"},
 	} {
-		for _, preference := range []string{"", "legacy", "invalid"} {
+		for _, preference := range []string{"legacy-v2"} {
 			req := httptest.NewRequest("GET", tc.source, nil)
 			if preference != "" {
 				req.AddCookie(&http.Cookie{Name: "factory_frontend", Value: preference})
@@ -414,7 +411,7 @@ func TestFrontendRouting(t *testing.T) {
 		require.Len(t, response.Result().Cookies(), 1)
 		preference := response.Result().Cookies()[0]
 		assert.Equal(t, "factory_frontend", preference.Name)
-		assert.Equal(t, "legacy", preference.Value)
+		assert.Equal(t, "legacy-v2", preference.Value)
 		assert.Greater(t, preference.MaxAge, 0)
 		for _, entry := range []string{"/dashboard/overview", "/pricing", "/keys", "/system-settings"} {
 			req := httptest.NewRequest(http.MethodGet, entry, nil)

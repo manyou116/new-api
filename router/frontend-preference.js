@@ -1,10 +1,13 @@
 (function (config) {
   var preference = config.preference;
-  var fromServer = preference === "consumer" || preference === "legacy";
+  var fromServer = preference === "consumer" || preference === "legacy-v2";
   try {
     if (fromServer) localStorage.setItem("factory:frontend", preference);
     else preference = localStorage.getItem("factory:frontend");
+    if (preference !== "legacy-v2") preference = "consumer";
+    localStorage.setItem("factory:frontend", preference);
   } catch {}
+  if (preference !== "legacy-v2") preference = "consumer";
 
   function consumerPath(pathname) {
     try {
@@ -27,10 +30,10 @@
     if (!config.consumerAvailable) return false;
     var choice = preference;
     try {
-      var match = document.cookie.match(/(?:^|;\s*)factory_frontend=(consumer|legacy)(?:;|$)/);
+      var match = document.cookie.match(/(?:^|;\s*)factory_frontend=(consumer|legacy-v2)(?:;|$)/);
       if (match) choice = match[1];
     } catch {}
-    if (choice !== "consumer") return false;
+    if (choice === "legacy-v2") return false;
     try {
       var target = new URL(href, window.location.origin);
       if (target.origin !== window.location.origin || !consumerPath(target.pathname)) return false;
@@ -47,7 +50,7 @@
       return false;
     }
   };
-  if (fromServer || (preference !== "consumer" && preference !== "legacy")) return;
+  if (fromServer) return;
 
   // This cookie stores only an interface choice. It never grants API access.
   try {

@@ -5,6 +5,7 @@ import { useSession } from '@/lib/session'
 export function FrontendEntry(props: { workspace?: boolean }) {
   const { t } = useTranslation()
   const { user } = useSession()
+  if (!user || user.role < 10) return null
   const returnTo = props.workspace ? '/dashboard' : '/'
   return (
     <span className="row frontend-entry">

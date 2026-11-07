@@ -40,7 +40,7 @@ describe('consumer development gateway', () => {
       }
       if (
         enabled &&
-        req.headers.cookie?.includes('factory_frontend=consumer') &&
+        !req.headers.cookie?.includes('factory_frontend=legacy-v2') &&
         path.startsWith('/pricing')
       ) {
         res.writeHead(307, { Location: '/explore?group=vip' })
@@ -54,7 +54,7 @@ describe('consumer development gateway', () => {
       const consumer =
         enabled &&
         (path.startsWith('/app/oauth/') ||
-          (req.headers.cookie?.includes('factory_frontend=consumer') &&
+          (!req.headers.cookie?.includes('factory_frontend=legacy-v2') &&
             ['/', '/keys', '/wallet', '/plans'].includes(path.split('?')[0])))
       res.setHeader('X-Factory-Frontend', consumer ? 'consumer' : 'legacy')
       res.end(`backend:${consumer ? 'consumer' : 'legacy'}:${path}`)
@@ -93,25 +93,25 @@ describe('consumer development gateway', () => {
     'honors legacy preference on shared page %s before serving HTML',
     async (path) => {
       const response = await fetch(origin + path, {
-        headers: { Cookie: 'factory_frontend=legacy' },
+        headers: { Cookie: 'factory_frontend=legacy-v2' },
       })
       expect(await response.text()).toBe(`backend:legacy:${path}`)
       expect(requests).toContainEqual({
         method: 'HEAD',
         path,
-        cookie: 'factory_frontend=legacy',
+        cookie: 'factory_frontend=legacy-v2',
         host: new URL(origin).host,
       })
     },
   )
 
-  it.each(['', 'factory_frontend=invalid'])(
-    'defaults to backend legacy HTML without a valid saved preference (%s)',
+  it.each(['', 'factory_frontend=invalid', 'factory_frontend=legacy'])(
+    'serves consumer by default and migrates historical choices (%s)',
     async (cookie) => {
       const response = await fetch(origin + '/', {
         headers: cookie ? { Cookie: cookie } : undefined,
       })
-      expect(await response.text()).toBe('backend:legacy:/')
+      expect(await response.text()).toContain('Consumer dev fixture')
       expect(response.headers.get('set-cookie')).toBeNull()
     },
   )
