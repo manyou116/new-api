@@ -23,6 +23,7 @@ async function renderUsage(
   pendingSummary?: Promise<void>,
   record?: Partial<UsageLog>,
   initialKey?: { id: number; name: string },
+  additionalRecords: Partial<UsageLog>[] = [],
 ) {
   const fetch = vi.fn(async (path: string, _options?: RequestInit) => {
     const url = new URL(path, 'http://localhost')
@@ -49,7 +50,7 @@ async function renderUsage(
       )
         await pendingPage
       data = {
-        total: pendingPage ? 30 : 1,
+        total: pendingPage ? 30 : 1 + additionalRecords.length,
         items: [
           {
             id: 1,
@@ -84,6 +85,21 @@ async function renderUsage(
             }),
             ...record,
           },
+          ...additionalRecords.map((item, index) => ({
+            id: index + 2,
+            type: 2,
+            model_name: 'extra-' + index,
+            created_at: 1,
+            quota: 0,
+            prompt_tokens: 1000,
+            completion_tokens: 1,
+            use_time: 1,
+            is_stream: false,
+            group: 'default',
+            token_name: 'Editor',
+            other: '{}',
+            ...item,
+          })),
         ],
       }
     }
@@ -387,17 +403,74 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
   expect(screen.getByRole('table')).toHaveTextContent(
     'First response latency: 1 sec · Total duration: 4 sec',
   )
-  expect(screen.getByText('40%')).toBeVisible()
+  expect(screen.getByText('100%')).toBeVisible()
+  expect(screen.getByText('Cache hit rate')).toBeVisible()
+  expect(screen.getByText('Cached share of input tokens: 40%')).toBeVisible()
   expect(screen.getByText('Cache read tokens: 400 · 40%')).toBeVisible()
-  expect(screen.getByRole('progressbar', { name: 'Cache read share' })).toHaveAttribute(
+  expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute(
     'value',
-    '40',
+    '100',
   )
   await userEvent.setup().click(screen.getByRole('button', { name: 'View' }))
   const dialog = screen.getByRole('dialog')
   expect(dialog).toHaveTextContent('Total duration4 sec')
   expect(dialog).toHaveTextContent('First response latency1 sec')
   expect(dialog).toHaveTextContent('Average output speed50 token/s')
+  expect(within(dialog).queryByText('Cache hit rate')).not.toBeInTheDocument()
+  expect(within(dialog).getByText('Cache read share')).toBeVisible()
+  expect(within(dialog).getByText('Cached share of input tokens')).toBeVisible()
+  expect(within(dialog).getByRole('progressbar', { name: 'Cache read share' })).toHaveAttribute(
+    'value',
+    '40',
+  )
+})
+
+it('counts cache-hit requests independently of token sizes and excludes unknown, failure and image records', async () => {
+  await renderUsage(undefined, undefined, undefined, undefined, undefined, undefined, [
+    { prompt_tokens: 9000, other: '{"cache_tokens":0}' },
+    { other: '{}' },
+    { other: '{"cache_write_tokens":100}' },
+    { type: 5, other: '{"cache_tokens":500}' },
+    { other: '{"image_count":1,"cache_tokens":0}' },
+  ])
+  await screen.findByText('fixture-chat')
+  expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute('value', '50')
+  expect(screen.getByText('1 / 2 requests hit cache')).toBeVisible()
+  expect(screen.getByText(/2 requests have no cache-read data and are excluded\./)).toBeVisible()
+  expect(screen.getByText('Cached share of input tokens: 4%')).toBeVisible()
+})
+
+it('counts a known cache hit even when its total input is unavailable', async () => {
+  await renderUsage(undefined, undefined, undefined, undefined, {
+    prompt_tokens: 0,
+    other: '{"cache_tokens":400}',
+  })
+  await screen.findByText('fixture-chat')
+  expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute(
+    'value',
+    '100',
+  )
+  expect(screen.queryByText(/Cached share of input tokens:/)).not.toBeInTheDocument()
+})
+
+it.each([
+  { other: '{"cache_tokens":0}', rate: '0', status: 'Cache miss' },
+  { other: '{}', rate: undefined, status: 'Not recorded' },
+  { other: '{"cache_write_tokens":100}', rate: undefined, status: 'Not recorded' },
+])('distinguishes misses from unknown read counts in $other', async ({ other, rate, status }) => {
+  await renderUsage(undefined, undefined, undefined, undefined, { other })
+  await screen.findByText('fixture-chat')
+  if (rate === undefined)
+    expect(screen.queryByRole('progressbar', { name: 'Cache hit rate' })).not.toBeInTheDocument()
+  else
+    expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute(
+      'value',
+      rate,
+    )
+  await userEvent.click(screen.getByRole('button', { name: 'View' }))
+  expect(
+    within(screen.getByRole('dialog')).getByText('Cache status').closest('div'),
+  ).toHaveTextContent(status)
 })
 
 it('opens a key-specific history with precise identity, matching spending and all request types', async () => {

@@ -130,7 +130,18 @@ export function RequestDetails(props: { log: UsageLog }) {
               </div>
             </dl>
             <div className="request-cache-share">
-              <span>{t('Cache read share')}</span>
+              <span>{t('Cache status')}</span>
+              <strong>
+                {cache?.read === undefined
+                  ? t('Not recorded')
+                  : t(cache.read > 0 ? 'Cache hit' : 'Cache miss')}
+              </strong>
+            </div>
+            <div className="request-cache-share">
+              <span>
+                {t('Cache read share')}
+                <small className="cache-rate-caption">{t('Cached share of input tokens')}</small>
+              </span>
               <strong>
                 {cache?.share === undefined
                   ? t('Not recorded')

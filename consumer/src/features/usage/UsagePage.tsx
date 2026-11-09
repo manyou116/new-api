@@ -173,16 +173,22 @@ export default function UsagePage(props: {
     { label: 'Request ID', value: filters.requestID },
   ].filter((filter) => filter.value)
   const pageCache = (logs.data?.items || [])
-    .filter((log) => log.type === 2)
+    .filter((log) => log.type === 2 && usageMetric(log).kind === 'tokens')
     .flatMap((log) => {
       const cache = usageCache(log.other, log.prompt_tokens)
-      return cache ? [cache] : []
+      return [cache ?? { read: undefined, write: undefined, total: undefined, share: undefined }]
     })
   const cacheRead = pageCache.reduce((sum, cache) => sum + (cache.read ?? 0), 0)
   const cacheWrite = pageCache.reduce((sum, cache) => sum + (cache.write ?? 0), 0)
   const comparableCache = pageCache.filter((cache) => cache.share !== undefined)
   const comparableReads = comparableCache.reduce((sum, cache) => sum + (cache.read ?? 0), 0)
   const cacheInput = comparableCache.reduce((sum, cache) => sum + (cache.total ?? 0), 0)
+  const knownRequests = pageCache.filter((cache) => cache.read !== undefined)
+  const hitRequests = knownRequests.filter(
+    (cache) => cache.read !== undefined && cache.read > 0,
+  ).length
+  const unknownRequests = pageCache.length - knownRequests.length
+  const hitRate = knownRequests.length ? (hitRequests / knownRequests.length) * 100 : undefined
 
   return (
     <div className="page-stack page-compact usage-page">
@@ -503,18 +509,29 @@ export default function UsagePage(props: {
             </dd>
           </div>
           <div>
-            <dt>{t('Cache read share')}</dt>
+            <dt>{t('Cache hit rate')}</dt>
             <dd>
-              {cacheInput
-                ? `${formatNumber((comparableReads / cacheInput) * 100, locale, { maximumFractionDigits: 1 })}%`
-                : '—'}
+              {hitRate === undefined
+                ? '—'
+                : `${formatNumber(hitRate, locale, { maximumFractionDigits: 1 })}%`}
             </dd>
+            <small className="cache-rate-caption">
+              {t('{{hits}} / {{count}} requests hit cache', {
+                hits: formatNumber(hitRequests, locale),
+                count: formatNumber(knownRequests.length, locale),
+              })}
+            </small>
             {cacheInput > 0 && (
-              <progress
-                aria-label={t('Cache read share')}
-                value={cacheInput ? (comparableReads / cacheInput) * 100 : 0}
-                max={100}
-              />
+              <small className="cache-rate-caption">
+                {t('Cached share of input tokens: {{share}}%', {
+                  share: formatNumber((comparableReads / cacheInput) * 100, locale, {
+                    maximumFractionDigits: 1,
+                  }),
+                })}
+              </small>
+            )}
+            {hitRate !== undefined && (
+              <progress aria-label={t('Cache hit rate')} value={hitRate} max={100} />
             )}
           </div>
           <div>
@@ -531,6 +548,17 @@ export default function UsagePage(props: {
           </div>
         </dl>
         <p className="muted usage-filter-help">
+          {t(
+            'Cache hit rate = requests with cache reads / requests with recorded cache-read data. Successful token-based requests on this page only.',
+          )}
+          {unknownRequests > 0 && (
+            <>
+              {' '}
+              {t('{{count}} requests have no cache-read data and are excluded.', {
+                count: formatNumber(unknownRequests, locale),
+              })}
+            </>
+          )}{' '}
           {t(
             'Cache counts cover this page only. Share uses records with a known input total; missing records are excluded.',
           )}
