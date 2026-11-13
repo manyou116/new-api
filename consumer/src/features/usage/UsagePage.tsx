@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId, useMemo, useState } from 'react'
-import { SlidersHorizontal } from 'lucide-react'
+import { CalendarDays, ListFilter, RefreshCw, SlidersHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   Badge,
@@ -17,17 +17,18 @@ import {
 } from '@/components/ui'
 import { request } from '@/lib/api'
 import { useCatalog } from '@/lib/catalog'
-import { formatDate, formatDurationMilliseconds, formatNumber, formatQuota } from '@/lib/format'
+import { formatBalance, formatDate, formatNumber, formatQuota } from '@/lib/format'
 import { useSession } from '@/lib/session'
 import { useStatus } from '@/lib/status'
 import { toIntlLocale } from '@/i18n/languages'
-import { dailyUsage, type UsagePoint, usageMetric, usageTiming, usageCache } from './chart'
+import { dailyUsage, type UsagePoint, usageMetric, usageCache } from './chart'
 import '../wallet/wallet.css'
 import { Pagination } from '@/components/pagination'
 import { SearchSelect } from '@/components/search-select'
 import { DateTimePicker } from '@/components/date-time-picker'
 import { SpendingChart } from './SpendingChart'
-import { RequestDetails, RequestStatus } from './RequestDetails'
+import { RequestDetails } from './RequestDetails'
+import { UsageRecords } from './UsageRecords'
 import './usage.css'
 
 export interface UsageLog {
@@ -194,11 +195,13 @@ export default function UsagePage(props: {
     <div className="page-stack page-compact usage-page">
       <PageHeader
         compact
-        title={t('Usage')}
+        eyebrow={t('Usage')}
+        title={t('Every request, clearly accounted for.')}
         description={t('Understand what you use and what you spend.')}
         actions={
           <>
             <a className="button button-secondary" href="#usage-records">
+              <ListFilter size={15} aria-hidden />
               {t('Request history')}
             </a>
             <Button
@@ -210,6 +213,7 @@ export default function UsagePage(props: {
                 void queryClient.invalidateQueries({ queryKey: ['usage-history'] })
               }}
             >
+              <RefreshCw size={15} aria-hidden />
               {t('Refresh')}
             </Button>
           </>
@@ -408,31 +412,48 @@ export default function UsagePage(props: {
           'Spending and activity summaries include consumption for the selected period, model, group and API key. Request ID and record type filter the records only.',
         )}
       </p>
-      <div
-        className="card-grid usage-stats"
+      <Card
+        className="usage-stats"
         data-testid="usage-summary"
+        role="region"
+        aria-label={t('Usage overview')}
         aria-busy={stats.isFetching}
       >
-        <Card className="stack">
+        <div className="usage-stat usage-stat-spending">
           <span className="eyebrow">{t('SPENT IN THIS PERIOD')}</span>
-          <strong className="balance-number">
-            {stats.data ? formatQuota(stats.data.quota, site.data, locale) : '—'}
+          <strong
+            className="balance-number"
+            title={stats.data ? formatQuota(stats.data.quota, site.data, locale) : undefined}
+          >
+            {stats.data ? formatBalance(stats.data.quota, site.data, locale) : '—'}
           </strong>
-        </Card>
-        <Card className="stack">
-          <span className="eyebrow">{t('RECENT REQUESTS / MIN')}</span>
+          <span className="muted usage-stat-caption">
+            <CalendarDays size={12} aria-hidden />
+            {dateFormat.format(start * 1000)} — {dateFormat.format(end * 1000)}
+          </span>
+        </div>
+        <div className="usage-stat">
+          <span className="eyebrow">
+            <span className="usage-live-dot" />
+            {t('RECENT REQUESTS / MIN')}
+          </span>
           <strong className="balance-number">
             {stats.data ? formatNumber(stats.data.rpm, locale) : '—'}
           </strong>
-          <span className="muted">{t('Current activity, not the total for this period')}</span>
-        </Card>
-        <Card className="stack">
+          <span className="muted usage-stat-caption">
+            {t('Recent rate, not the total for this period')}
+          </span>
+        </div>
+        <div className="usage-stat">
           <span className="eyebrow">{t('RECENT TOKENS / MIN')}</span>
           <strong className="balance-number">
             {stats.data ? formatNumber(stats.data.tpm, locale) : '—'}
           </strong>
-        </Card>
-      </div>
+          <span className="muted usage-stat-caption">
+            {t('Recent rate, not the total for this period')}
+          </span>
+        </div>
+      </Card>
       {stats.error && <ErrorState error={stats.error} retry={() => void stats.refetch()} />}
       {!filters.tokenID && (
         <Card
@@ -440,10 +461,15 @@ export default function UsagePage(props: {
           className="usage-chart-shell"
           aria-busy={history.isFetching}
         >
-          <h2>{t('Your spending over time')}</h2>
-          <p className="muted">
-            {t('All models and groups. Dashboard data can take a few minutes to update.')}
-          </p>
+          <div className="usage-chart-heading">
+            <div>
+              <h2>{t('Your spending over time')}</h2>
+              <p className="muted">
+                {t('All models and groups. Dashboard data can take a few minutes to update.')}
+              </p>
+            </div>
+            <span className="usage-chart-legend">{t('Cost')}</span>
+          </div>
           <div className="usage-chart-region">
             {history.data ? (
               <SpendingChart daily={daily} />
@@ -494,11 +520,13 @@ export default function UsagePage(props: {
       {!filters.tokenID && history.error && (
         <ErrorState error={history.error} retry={() => void history.refetch()} />
       )}
-      <h2 id="usage-records" tabIndex={-1}>
-        {t('Request history')}
-      </h2>
-      <Card className="usage-cache-summary">
-        <h3>{t('Cache usage on this page')}</h3>
+      <Card className="usage-cache-summary" aria-busy={logs.isFetching}>
+        <div className="usage-cache-heading">
+          <h3>{t('Cache usage on this page')}</h3>
+          <span className="muted">
+            {formatNumber(logs.data?.items.length || 0, locale)} {t('Requests')}
+          </span>
+        </div>
         <dl className="usage-cache-metrics">
           <div>
             <dt>{t('Recorded cache reads')}</dt>
@@ -539,32 +567,45 @@ export default function UsagePage(props: {
             <dd>
               {pageCache.some((cache) => cache.write !== undefined)
                 ? formatNumber(cacheWrite, locale)
-                : '—'}
+                : t('Not recorded')}
             </dd>
           </div>
-          <div>
-            <dt>{t('Records with a comparable cache breakdown')}</dt>
-            <dd>{formatNumber(comparableCache.length, locale)}</dd>
-          </div>
         </dl>
-        <p className="muted usage-filter-help">
-          {t(
-            'Cache hit rate = requests with cache reads / requests with recorded cache-read data. Successful token-based requests on this page only.',
-          )}
-          {unknownRequests > 0 && (
-            <>
-              {' '}
-              {t('{{count}} requests have no cache-read data and are excluded.', {
-                count: formatNumber(unknownRequests, locale),
-              })}
-            </>
-          )}{' '}
-          {t(
-            'Cache counts cover this page only. Share uses records with a known input total; missing records are excluded.',
-          )}
-        </p>
+        <details className="usage-cache-explanation">
+          <summary>{t('Details')}</summary>
+          <p className="muted usage-filter-help">
+            {t('Records with a comparable cache breakdown')}:{' '}
+            {formatNumber(comparableCache.length, locale)}
+          </p>
+          <p className="muted usage-filter-help">
+            {t(
+              'Cache hit rate = requests with cache reads / requests with recorded cache-read data. Successful token-based requests on this page only.',
+            )}
+            {unknownRequests > 0 && (
+              <>
+                {' '}
+                {t('{{count}} requests have no cache-read data and are excluded.', {
+                  count: formatNumber(unknownRequests, locale),
+                })}
+              </>
+            )}{' '}
+            {t(
+              'Cache counts cover this page only. Share uses records with a known input total; missing records are excluded.',
+            )}
+          </p>
+        </details>
       </Card>
-      <div className="query-status" role="status">
+      <div className="usage-records-heading">
+        <h2 id="usage-records" tabIndex={-1}>
+          {t('Request history')}
+        </h2>
+        {logs.data && (
+          <span className="muted">
+            {t('Requests')}: {formatNumber(logs.data.total, locale)}
+          </span>
+        )}
+      </div>
+      <div className="query-status" role="status" hidden={!logs.isPlaceholderData}>
         {logs.isPlaceholderData
           ? t('Loading the selected page. Previous records remain visible.')
           : '\u00a0'}
@@ -581,126 +622,12 @@ export default function UsagePage(props: {
         />
       )}
       {!!logs.data?.items.length && (
-        <div className="usage-records" aria-busy={logs.isFetching}>
-          <table className="consumer-table usage-record-table">
-            <thead>
-              <tr>
-                <th>{t('Request')}</th>
-                <th>{t('Usage quantity')}</th>
-                <th>{t('Cost')}</th>
-                <th>{t('Details')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.data.items.map((log) => {
-                const metric = usageMetric(log)
-                const timing = usageTiming(log)
-                const cache = log.type === 2 ? usageCache(log.other, log.prompt_tokens) : undefined
-                return (
-                  <tr key={log.id}>
-                    <td data-label={t('Request')}>
-                      <div className="usage-context">
-                        <strong title={log.model_name}>{log.model_name || '—'}</strong>
-                        <small title={log.request_id}>{log.request_id}</small>
-                        <span className="usage-record-date">
-                          {formatDate(log.created_at, locale)}
-                        </span>
-                        <div className="usage-record-tags">
-                          <Badge>{log.group}</Badge>
-                          <RequestStatus log={log} />
-                          <span title={log.token_name}>{log.token_name || t('Website')}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td data-label={t('Usage quantity')}>
-                      <div className="usage-record-metrics">
-                        {log.type !== 2 && <span>—</span>}
-                        {log.type === 2 &&
-                          (metric.kind === 'images' ? (
-                            <>
-                              <strong>
-                                {metric.count === undefined
-                                  ? t('Image count not recorded')
-                                  : t('{{count}} images', {
-                                      count: formatNumber(metric.count, locale),
-                                    })}
-                              </strong>
-                              <span>
-                                {t('Total duration')}:{' '}
-                                {formatDurationMilliseconds(
-                                  timing.duration === undefined
-                                    ? undefined
-                                    : timing.duration * 1000,
-                                  locale,
-                                )}
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <strong>
-                                {t('Input / output tokens')}:{' '}
-                                {formatNumber(cache?.total ?? log.prompt_tokens, locale)} /{' '}
-                                {formatNumber(log.completion_tokens, locale)}
-                              </strong>
-                              <span>
-                                {t('Cache read tokens')}:{' '}
-                                {cache?.read === undefined
-                                  ? t('Not recorded')
-                                  : formatNumber(cache.read, locale)}
-                                {cache?.share !== undefined &&
-                                  ` · ${formatNumber(cache.share, locale, { maximumFractionDigits: 1 })}%`}
-                              </span>
-                              {cache?.write !== undefined && (
-                                <span>
-                                  {t('Cache write tokens')}: {formatNumber(cache.write, locale)}
-                                </span>
-                              )}
-                              <span
-                                title={t(
-                                  'Speed includes waiting time; only streamed text with recorded output and duration is measured.',
-                                )}
-                              >
-                                {t('Average output speed')}:{' '}
-                                {timing.tokensPerSecond === undefined
-                                  ? '—'
-                                  : `${formatNumber(timing.tokensPerSecond, locale, { maximumFractionDigits: 2 })} token/s`}
-                                {timing.tokensPerSecond === undefined &&
-                                  log.completion_tokens === 0 &&
-                                  ` · ${t('No output tokens recorded')}`}
-                              </span>
-                              <span>
-                                {t('First response latency')}:{' '}
-                                {timing.firstResponse === undefined
-                                  ? t('Not recorded')
-                                  : formatDurationMilliseconds(timing.firstResponse * 1000, locale)}
-                                {' · '}
-                                {t('Total duration')}:{' '}
-                                {timing.duration === undefined
-                                  ? t('Not recorded')
-                                  : formatDurationMilliseconds(timing.duration * 1000, locale)}
-                              </span>
-                            </>
-                          ))}
-                      </div>
-                    </td>
-                    <td data-label={t('Cost')} className="usage-record-cost">
-                      {formatQuota(log.quota, site.data, locale)}
-                    </td>
-                    <td data-label={t('Details')} className="usage-record-action">
-                      <Button
-                        disabled={logs.isPlaceholderData}
-                        variant="ghost"
-                        onClick={() => setSelected(log)}
-                      >
-                        {t('View')}
-                      </Button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <UsageRecords
+          logs={logs.data.items}
+          busy={logs.isFetching}
+          stale={logs.isPlaceholderData}
+          onSelect={setSelected}
+        />
       )}
       {logs.data && (
         <Pagination

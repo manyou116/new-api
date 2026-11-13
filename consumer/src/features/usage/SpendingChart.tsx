@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui'
-import { formatNumber, formatQuota } from '@/lib/format'
+import { formatBalance, formatNumber, formatQuota } from '@/lib/format'
 import { useStatus } from '@/lib/status'
 import { toIntlLocale } from '@/i18n/languages'
 import type { DailyUsage } from './chart'
@@ -21,6 +21,7 @@ export function SpendingChart(props: { daily: DailyUsage[] }) {
     year: 'numeric',
   })
   const shortDateFormat = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' })
+  const dayFormat = new Intl.DateTimeFormat(locale, { day: 'numeric' })
   if (!selected) return null
   return (
     <div className="spending-chart">
@@ -38,7 +39,7 @@ export function SpendingChart(props: { daily: DailyUsage[] }) {
       >
         <div className="spending-axis" aria-label={t('Cost')}>
           {[1, 0.5, 0].map((ratio) => (
-            <span key={ratio}>{formatQuota(peak * ratio, site.data, locale)}</span>
+            <span key={ratio}>{formatBalance(peak * ratio, site.data, locale)}</span>
           ))}
         </div>
         <div
@@ -66,9 +67,15 @@ export function SpendingChart(props: { daily: DailyUsage[] }) {
                 />
               </span>
               <span className="spending-date" aria-hidden>
-                {index % Math.ceil(props.daily.length / 6) === 0 || index === props.daily.length - 1
-                  ? shortDateFormat.format(day.date * 1000)
-                  : '\u00a0'}
+                {(index % Math.ceil(props.daily.length / 6) === 0 ||
+                  index === props.daily.length - 1) && (
+                  <>
+                    <span className="spending-date-long">
+                      {shortDateFormat.format(day.date * 1000)}
+                    </span>
+                    <span className="spending-date-short">{dayFormat.format(day.date * 1000)}</span>
+                  </>
+                )}
               </span>
             </Button>
           ))}

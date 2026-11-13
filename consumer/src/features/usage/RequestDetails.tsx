@@ -56,7 +56,8 @@ export function RequestDetails(props: { log: UsageLog }) {
   const metric = usageMetric(log)
   const timing = usageTiming(log)
   const cache = log.type === 2 ? usageCache(log.other, log.prompt_tokens) : undefined
-  const stream = usageDetails(log.other).stream_status
+  const details = usageDetails(log.other)
+  const stream = details.stream_status
   const interrupted = Boolean(
     log.type === 2 &&
     stream &&
@@ -196,6 +197,11 @@ export function RequestDetails(props: { log: UsageLog }) {
               </div>
             )}
           </dl>
+          {log.type === 2 && metric.kind === 'tokens' && timing.firstResponse !== undefined && (
+            <p className="muted usage-filter-help">
+              {t('Time to the first upstream stream event; this may precede the first text token.')}
+            </p>
+          )}
           {log.type === 2 && metric.kind === 'tokens' && (
             <p className="muted usage-filter-help">
               {t(
@@ -206,7 +212,10 @@ export function RequestDetails(props: { log: UsageLog }) {
         </section>
       )}
       {log.type === 2 && (
-        <details className="request-billing-disclosure">
+        <details
+          className="request-billing-disclosure"
+          open={details.billing_mode === 'tiered_expr'}
+        >
           <summary>{t('Billing details')}</summary>
           <BillingDetails other={log.other} />
         </details>

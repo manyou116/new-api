@@ -298,8 +298,7 @@ it('shows public cache and billing details without exposing privileged metadata'
   expect(within(dialog).getAllByText('Cache read tokens')[0]).toBeVisible()
   expect(within(dialog).getAllByText('Cache write tokens')[0]).toBeVisible()
   expect(within(dialog).getByRole('region', { name: 'Token usage' })).toHaveTextContent('40%')
-  expect(within(dialog).getByText('Billable token breakdown')).not.toBeVisible()
-  await user.click(within(dialog).getByText('Billing details', { selector: 'summary' }))
+  expect(within(dialog).getByText('Billable token breakdown')).toBeVisible()
   expect(within(dialog).getByText('Dynamic pricing')).toBeVisible()
   expect(within(dialog).getByText('Billable token breakdown')).toBeVisible()
   expect(dialog).not.toHaveTextContent('HIDDEN_')
@@ -387,9 +386,6 @@ it('shows historical server prices including explicit free cache without recompu
   await renderUsage()
   await userEvent.setup().click(await screen.findByRole('button', { name: 'View' }))
   const dialog = await screen.findByRole('dialog')
-  await userEvent
-    .setup()
-    .click(within(dialog).getByText('Billing details', { selector: 'summary' }))
   expect(within(dialog).getByText('$0.00 per million tokens')).toBeVisible()
   expect(within(dialog).getByText('$3.50 per million tokens')).toBeVisible()
 })
@@ -398,15 +394,22 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
   await renderUsage()
   await screen.findByText('fixture-chat')
   expect(screen.getByText('Cache usage on this page')).toBeVisible()
-  expect(screen.getByText(/Cache counts cover this page only/)).toBeVisible()
-  expect(screen.getByText('Average output speed: 50 token/s')).toBeVisible()
+  const cacheHelp = screen.getByText(/Cache counts cover this page only/)
+  expect(cacheHelp).not.toBeVisible()
+  await userEvent.setup().click(screen.getByText('Details', { selector: 'summary' }))
+  expect(cacheHelp).toBeVisible()
+  expect(screen.getByText('50 token/s', { exact: false })).toBeVisible()
   expect(screen.getByRole('table')).toHaveTextContent(
     'First response latency: 1 sec · Total duration: 4 sec',
   )
   expect(screen.getByText('100%')).toBeVisible()
   expect(screen.getByText('Cache hit rate')).toBeVisible()
   expect(screen.getByText('Cached share of input tokens: 40%')).toBeVisible()
-  expect(screen.getByText('Cache read tokens: 400 · 40%')).toBeVisible()
+  const cacheCell = within(screen.getByRole('row', { name: /fixture-chat/ })).getAllByRole(
+    'cell',
+  )[2]!
+  expect(cacheCell).toHaveTextContent('Cache read tokens: 400')
+  expect(cacheCell).toHaveTextContent('40%')
   expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute(
     'value',
     '100',
@@ -436,6 +439,7 @@ it('counts cache-hit requests independently of token sizes and excludes unknown,
   await screen.findByText('fixture-chat')
   expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute('value', '50')
   expect(screen.getByText('1 / 2 requests hit cache')).toBeVisible()
+  await userEvent.setup().click(screen.getByText('Details', { selector: 'summary' }))
   expect(screen.getByText(/2 requests have no cache-read data and are excluded\./)).toBeVisible()
   expect(screen.getByText('Cached share of input tokens: 4%')).toBeVisible()
 })
@@ -570,11 +574,13 @@ it('does not label prior records as belonging to newly applied filters while loa
   await screen.findByText('fixture-chat')
 })
 
-it('keeps request context, performance and cost accessible in a compact four-column history', async () => {
+it('keeps token direction, cache, performance and precise cost in a five-column history', async () => {
   await renderUsage()
   await screen.findByText('fixture-chat')
   const table = screen.getByRole('table')
-  expect(within(table).getAllByRole('columnheader')).toHaveLength(4)
+  expect(within(table).getAllByRole('columnheader')).toHaveLength(5)
+  expect(within(table).getByRole('columnheader', { name: /Input \/ output tokens/ })).toBeVisible()
+  expect(within(table).getByRole('columnheader', { name: 'Cache read tokens' })).toBeVisible()
   const row = within(table).getAllByRole('row')[1]!
   expect(row).toHaveTextContent('req-synthetic')
   expect(row).toHaveTextContent('Editor')
@@ -587,6 +593,29 @@ it('keeps request context, performance and cost accessible in a compact four-col
   expect(
     within(screen.getByRole('dialog')).getByRole('region', { name: 'Token usage' }),
   ).toHaveTextContent('Output tokens200')
+})
+
+it('rounds the overview amount while retaining the exact recorded amount on request rows', async () => {
+  await renderUsage()
+  await screen.findByText('fixture-chat')
+  const summary = screen.getByRole('region', { name: 'Usage overview' })
+  expect(within(summary).getByText('$0.00')).toHaveAttribute('title', '$0.000002')
+  expect(within(summary).getAllByText('Recent rate, not the total for this period')).toHaveLength(2)
+  expect(screen.getByRole('row', { name: /fixture-chat/ })).toHaveTextContent('$0.000002')
+})
+
+it('keeps long request identifiers available in the detail and returns focus after closing it', async () => {
+  const identifier = 'req-' + 'long-request-id-'.repeat(20)
+  await renderUsage(undefined, undefined, undefined, undefined, {
+    model_name: 'long-model-name-'.repeat(15),
+    request_id: identifier,
+  })
+  const button = await screen.findByRole('button', { name: 'View' })
+  await userEvent.setup().click(button)
+  const dialog = screen.getByRole('dialog', { name: 'Request details' })
+  expect(within(dialog).getByText(identifier)).toBeVisible()
+  await userEvent.setup().click(within(dialog).getByRole('button', { name: 'Close' }))
+  await waitFor(() => expect(button).toHaveFocus())
 })
 
 it('cancels calendar edits without applying a filter and clears an applied date explicitly', async () => {
