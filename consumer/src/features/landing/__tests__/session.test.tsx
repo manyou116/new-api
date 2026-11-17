@@ -120,10 +120,13 @@ it('keeps the sign-in entry available when session restoration is temporarily un
   expect(screen.queryByText('Restoring your session…')).not.toBeInTheDocument()
 })
 
-it('keeps legacy and administration entrances out of the visitor homepage', async () => {
+it('offers the legacy switch on the visitor homepage without an administration entrance', async () => {
   clearAuth()
   await showHome()
-  expect(screen.queryByRole('link', { name: 'Switch to legacy' })).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Switch to legacy' })).toHaveAttribute(
+    'href',
+    '/frontend/switch?version=legacy&return_to=%2F',
+  )
   expect(screen.queryByRole('link', { name: 'Administration' })).not.toBeInTheDocument()
 })
 
