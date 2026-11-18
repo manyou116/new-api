@@ -4,15 +4,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -76,6 +79,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	defer service.CloseResponseBodyGracefully(resp)
 
 	accumulator := service.NewResponsesUsageAccumulator(info)
+	waiveFailure := info.RelayMode == relayconstant.RelayModeResponses &&
+		info.RelayFormat == types.RelayFormatOpenAIResponses &&
+		!strings.HasPrefix(info.OriginModelName, "gpt-4o-audio") &&
+		operation_setting.ShouldWaiveFailedResponses()
+	if info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration] != nil {
+		waiveFailure = false
+	}
+	var deliveredTerminal bool
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -89,13 +100,67 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if streamResponse.Response != nil {
 			data = string(rewriteSGLangResponsesCreatedAt(info, []byte(data), "response.created_at", streamResponse.Response.CreatedAt))
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		writeErr := helper.ResponseChunkData(c, streamResponse, data)
 		accumulator.Observe(&streamResponse, common.StringToByteSlice(data))
+		if waiveFailure {
+			if writeErr != nil {
+				sr.Stop(writeErr)
+				return
+			}
+			deliveredTerminal = deliveredTerminal || isBillableResponsesTerminal(&streamResponse)
+		}
 	})
 
 	common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, info.StreamStatus)
 	info.StreamStatus.RequireTerminal()
-	return accumulator.Finish(), nil
+	usage := accumulator.Finish()
+	if waiveFailure && (!deliveredTerminal || info.StreamStatus.ResponseFailed()) {
+		info.WaiveFailedResponsesCharge = true
+		// Preserve existing billing for completed, separately metered tool calls.
+		if info.ResponsesUsageInfo != nil {
+			for _, tool := range info.ResponsesUsageInfo.BuiltInTools {
+				if tool != nil && tool.CallCount > 0 {
+					info.WaiveFailedResponsesCharge = false
+					break
+				}
+			}
+		}
+		if info.WaiveFailedResponsesCharge && info.StreamStatus.IsNormalEnd() &&
+			!info.StreamStatus.ResponseFailed() && !info.StreamStatus.HasErrors() {
+			info.StreamStatus.RecordError("Responses stream ended without a successfully delivered result")
+		}
+	}
+	return usage, nil
+}
+
+func isBillableResponsesTerminal(event *dto.ResponsesStreamResponse) bool {
+	response := event.Response
+	if response == nil {
+		return false
+	}
+	var status string
+	if len(response.Status) > 0 && common.Unmarshal(response.Status, &status) != nil {
+		return false
+	}
+	switch event.Type {
+	case "response.completed", "response.done":
+		if status == "" || status == "completed" {
+			return response.Error == nil
+		}
+		if status != "incomplete" {
+			return false
+		}
+	case "response.incomplete":
+		if status != "" && status != "incomplete" {
+			return false
+		}
+	default:
+		return false
+	}
+	usage := response.Usage
+	return response.Error == nil && response.IncompleteDetails != nil &&
+		response.IncompleteDetails.Reason == "max_output_tokens" && usage != nil &&
+		(usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0)
 }
 
 func rewriteSGLangResponsesCreatedAt(info *relaycommon.RelayInfo, payload []byte, path string, createdAt dto.IntValue) []byte {

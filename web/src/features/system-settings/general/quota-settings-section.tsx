@@ -58,6 +58,7 @@ const quotaSchema = z.object({
   TopUpLink: z.string(),
   quota_setting: z.object({
     enable_free_model_pre_consume: z.boolean(),
+    waive_failed_responses: z.boolean(),
     trust_quota_usd: z.preprocess(
       (value) => (value === '' ? undefined : value),
       z.coerce
@@ -292,6 +293,29 @@ export function QuotaSettingsSection({
                           'When enabled, zero-cost models also pre-consume quota before final settlement.'
                         )}
                       </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={updateOption.isPending}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+            </SettingsFormGridItem>
+
+            <SettingsFormGridItem span='full'>
+              <FormField
+                control={form.control}
+                name='quota_setting.waive_failed_responses'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>
+                        {t('Do not charge for failed Responses text streams')}
+                      </FormLabel>
                     </SettingsSwitchContent>
                     <FormControl>
                       <Switch

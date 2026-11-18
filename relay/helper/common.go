@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -89,8 +90,11 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
+	(common.CustomEvent{}).WriteContentType(c.Writer)
+	frame := "event: " + resp.Type + "\ndata: " + data + "\n\n"
+	if _, err := c.Writer.WriteString(strings.ReplaceAll(frame, "\r", "\\r")); err != nil {
+		return err
+	}
 	return FlushWriter(c)
 }
 

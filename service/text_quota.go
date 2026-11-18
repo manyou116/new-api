@@ -388,6 +388,26 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 }
 
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []*common.Message) {
+	if relayInfo.WaiveFailedResponsesCharge {
+		err := SettleBilling(ctx, relayInfo, 0)
+		other := GenerateTextOtherInfo(ctx, relayInfo, 0, 0, 0, 0, 0, 0, 0)
+		tokenName := ctx.GetString("token_name")
+		useTime := int(time.Since(relayInfo.StartTime).Seconds())
+		if err != nil {
+			logger.LogError(ctx, common.LogText("failed to release quota for interrupted Responses stream: %s", err.Error()))
+			other.SetPublic("billing_status", "release_failed")
+			model.RecordErrorLog(ctx, relayInfo.UserId, relayInfo.ChannelId, relayInfo.OriginModelName, tokenName,
+				"Could not release reserved quota for interrupted response", relayInfo.TokenId, useTime, true, relayInfo.UsingGroup, other)
+			return
+		}
+		other.SetPublic("billing_status", "waived")
+		model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
+			ChannelId: relayInfo.ChannelId, ModelName: relayInfo.OriginModelName, TokenName: tokenName,
+			TokenId: relayInfo.TokenId, UseTimeSeconds: useTime, IsStream: true, Group: relayInfo.UsingGroup, Other: other,
+			Content: []*common.Message{common.NewMessage("No charge for interrupted response")},
+		})
+		return
+	}
 	originUsage := usage
 	billingUsage := effectiveBillingUsage(usage)
 	if usage == nil {

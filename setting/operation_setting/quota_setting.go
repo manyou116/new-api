@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
@@ -12,13 +13,17 @@ type QuotaSetting struct {
 	EnableFreeModelPreConsume bool    `json:"enable_free_model_pre_consume"` // 是否对免费模型启用预消耗
 	TrustQuotaUSD             float64 `json:"trust_quota_usd"`               // 钱包免预扣门槛，0 表示禁用
 	PreConsumeMultiplier      float64 `json:"pre_consume_multiplier"`        // 预计输入费用的预扣倍率，仅影响预留
+	WaiveFailedResponses      bool    `json:"waive_failed_responses"`
 }
+
+const WaiveFailedResponsesOptionKey = "quota_setting.waive_failed_responses"
 
 // 默认配置
 var quotaSetting = QuotaSetting{
 	EnableFreeModelPreConsume: true,
 	TrustQuotaUSD:             10,
 	PreConsumeMultiplier:      1,
+	WaiveFailedResponses:      true,
 }
 
 func init() {
@@ -30,8 +35,20 @@ func GetQuotaSetting() *QuotaSetting {
 	return &quotaSetting
 }
 
-// ValidateQuotaOption validates reservation settings before they are persisted.
+func ShouldWaiveFailedResponses() bool {
+	common.OptionMapRWMutex.RLock()
+	defer common.OptionMapRWMutex.RUnlock()
+	return quotaSetting.WaiveFailedResponses
+}
+
+// ValidateQuotaOption validates billing settings before they are persisted.
 func ValidateQuotaOption(key, value string) error {
+	if key == WaiveFailedResponsesOptionKey {
+		if value != "true" && value != "false" {
+			return fmt.Errorf("%s must be true or false", key)
+		}
+		return nil
+	}
 	if key != "quota_setting.trust_quota_usd" && key != "quota_setting.pre_consume_multiplier" {
 		return nil
 	}

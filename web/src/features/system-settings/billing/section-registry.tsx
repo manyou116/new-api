@@ -71,6 +71,8 @@ const BILLING_SECTIONS = [
               settings['quota_setting.pre_consume_multiplier'],
             enable_free_model_pre_consume:
               settings['quota_setting.enable_free_model_pre_consume'],
+            waive_failed_responses:
+              settings['quota_setting.waive_failed_responses'],
           },
         }}
         complianceConfirmed={

@@ -47,6 +47,7 @@ function Fixture() {
             TopUpLink: '',
             quota_setting: {
               enable_free_model_pre_consume: true,
+              waive_failed_responses: true,
               trust_quota_usd: 10,
               pre_consume_multiplier: 1,
             },
@@ -128,6 +129,24 @@ test('zero threshold disables bypass and saves as zero', async () => {
     expect(api.put).toHaveBeenCalledWith('/api/option/', {
       key: 'quota_setting.trust_quota_usd',
       value: 0,
+    })
+  )
+})
+
+test('disabling waived charges saves the Responses billing switch as false', async () => {
+  const user = userEvent.setup()
+  await renderSettings()
+  const toggle = screen.getByRole('switch', {
+    name: 'Do not charge for failed Responses text streams',
+  })
+  expect(toggle).toBeChecked()
+  await user.click(toggle)
+  expect(toggle).not.toBeChecked()
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() =>
+    expect(api.put).toHaveBeenCalledWith('/api/option/', {
+      key: 'quota_setting.waive_failed_responses',
+      value: false,
     })
   )
 })
