@@ -485,7 +485,11 @@ func TestResponsesInterruptedStreamHealth(t *testing.T) {
 				}
 			}
 			fixture.closeAndWait(t)
-			assertResponsesWSAccounting(t, fixture, []int{1000})
+			wantCharge := 0
+			if scenario == "websocket timeout" {
+				wantCharge = 1000
+			}
+			assertResponsesWSAccounting(t, fixture, []int{wantCharge})
 			if scenario == "sse client cancel" {
 				keys, err := common.RDB.Keys(context.Background(), "perf:ws-billing:*").Result()
 				require.NoError(t, err)
@@ -884,6 +888,7 @@ func TestResponsesWebSocketInitialUpstreamRejectionRefundsReservation(t *testing
 // TEST_RESPONSES_SQL_DSN / TEST_RESPONSES_LOG_SQL_DSN optionally run these
 // entry-point regressions against isolated real MySQL/PostgreSQL databases.
 func TestResponsesStreamOutcomesPreserveAccounting(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	for _, transport := range []string{"websocket", "http-sse"} {
 		for _, tc := range []struct {
 			name, expression, terminal string
@@ -960,7 +965,12 @@ func TestResponsesStreamOutcomesPreserveAccounting(t *testing.T) {
 						assert.JSONEq(t, expected, string(actual), "upstream frames must be delivered once and unchanged")
 					}
 				}
-				quotas := []int{1000}
+				waived := transport == "http-sse" && tc.failed
+				firstCharge := 1000
+				if waived {
+					firstCharge = 0
+				}
+				quotas := []int{firstCharge}
 				if tc.failed {
 					// The first terminal must complete settlement and middleware before
 					// admitting this immediately following request.
@@ -980,6 +990,11 @@ func TestResponsesStreamOutcomesPreserveAccounting(t *testing.T) {
 				require.Len(t, logs, len(quotas))
 				var other map[string]any
 				require.NoError(t, common.UnmarshalJsonStr(logs[0].Other, &other))
+				if waived {
+					assert.Equal(t, "waived", other["billing_status"])
+				} else {
+					assert.NotContains(t, other, "billing_status")
+				}
 				stream := other["stream_status"].(map[string]any)
 				if tc.failed {
 					assert.Equal(t, "error", stream["status"])
