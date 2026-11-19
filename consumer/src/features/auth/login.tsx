@@ -179,7 +179,6 @@ export default function LoginPage() {
                     name="username"
                     autoComplete="username"
                     required
-                    maxLength={20}
                     autoFocus
                     disabled={busy}
                   />

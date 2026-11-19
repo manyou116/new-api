@@ -53,16 +53,14 @@ it.each([
   ).toHaveLength(sent ? 1 : 0)
 })
 
-it('presents a failed sign-in as a translated authentication error while preserving its server reason', async () => {
+it('sends a long login identifier intact and preserves the translated server error on rejection', async () => {
   clearAuth()
   document.cookie = 'new_api_has_session=; Max-Age=0; path=/'
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (path: string) => {
-      if (path.startsWith('/api/status')) return Response.json({ success: true, data: {} })
-      return Response.json({ success: false, message: 'Invalid parameters' })
-    }),
-  )
+  const fetcher = vi.fn(async (path: string, _init?: RequestInit) => {
+    if (path.startsWith('/api/status')) return Response.json({ success: true, data: {} })
+    return Response.json({ success: false, message: 'Invalid parameters' })
+  })
+  vi.stubGlobal('fetch', fetcher)
   const i18n = createInstance()
   await i18n.init({ lng: 'zh', resources: { zh } })
   const client = new QueryClient({
@@ -82,10 +80,13 @@ it('presents a failed sign-in as a translated authentication error while preserv
     </I18nextProvider>,
   )
   const user = userEvent.setup()
-  await user.type(await screen.findByRole('textbox', { name: '用户名' }), 'synthetic-user')
+  const username = 'long-existing-login-name@example.test'
+  await user.type(await screen.findByRole('textbox', { name: '用户名' }), username)
   await user.type(screen.getByLabelText('密码', { exact: true }), 'synthetic-password')
   await user.click(screen.getByRole('button', { name: /^登录$/ }))
   const alert = await screen.findByRole('alert')
+  const loginRequest = fetcher.mock.calls.find(([path]) => path.startsWith('/api/user/login?'))
+  expect(JSON.parse(String(loginRequest?.[1]?.body)).username).toBe(username)
   expect(alert).toHaveTextContent('登录失败')
   expect(alert).toHaveTextContent('参数无效')
   expect(alert).not.toHaveTextContent('内容加载失败')
