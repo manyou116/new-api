@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import { expect, it } from 'vitest'
+import type { SiteStatus } from '@/lib/status'
 import { BillingDetails } from '../BillingDetails'
 import { RequestDetails } from '../RequestDetails'
 import type { UsageLog } from '../UsagePage'
@@ -39,11 +40,15 @@ const log: UsageLog = {
   other: JSON.stringify({ ...recorded, frt: 18930 }),
 }
 
-async function renderBilling(content: ReactNode) {
+async function renderBilling(content: ReactNode, siteStatus?: SiteStatus) {
   const i18n = createInstance()
   await i18n.init({ lng: 'en', resources: { en: { translation: {} } } })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  client.setQueryData(['status'], { quota_per_unit: 500000, quota_display_type: 'USD' })
+  client.setQueryData(['status'], {
+    quota_per_unit: 500000,
+    quota_display_type: 'USD',
+    ...siteStatus,
+  })
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={client}>{content}</QueryClientProvider>
@@ -54,10 +59,11 @@ async function renderBilling(content: ReactNode) {
 it('shows the recorded tier, full context and historical free unit price without recomputing a charge', async () => {
   await renderBilling(<RequestDetails log={log} />)
   const performance = screen.getByRole('region', { name: 'Response performance' })
-  expect(performance).toHaveTextContent('First response latency18.93 sec')
-  expect(performance).toHaveTextContent('Total duration36 sec')
-  expect(performance).toHaveTextContent('Average output speed8.61 token/s')
-  expect(performance).toHaveTextContent(
+  expect(performance).toHaveTextContent('First response latency18.93 s')
+  expect(performance).toHaveTextContent('Total duration36 s')
+  expect(screen.getByText('Average output speed: 8.61 token/s')).toBeVisible()
+  expect(within(performance).getByText('18.93 s')).toHaveAttribute(
+    'title',
     'Time to the first upstream stream event; this may precede the first text token.',
   )
   expect(screen.queryByText(/TTFT|First token latency/)).not.toBeInTheDocument()
@@ -66,11 +72,60 @@ it('shows the recorded tier, full context and historical free unit price without
   expect(tier).toHaveTextContent('Pricing tierlong_context')
   expect(tier).toHaveTextContent('len > 200000')
   expect(tier).toHaveTextContent('Input context length (len)322,707')
-  expect(screen.getByText('Group multiplier').closest('div')).toHaveTextContent('0.2×')
-  expect(screen.getByText('$0.00 per million tokens')).toBeVisible()
-  expect(screen.getByText('$0.80 per million tokens')).toBeVisible()
-  expect(screen.getByText('Recorded amount').closest('div')).toHaveTextContent('$0.007228')
+  expect(
+    screen.getAllByText('Group multiplier').filter((item) => !item.closest('details'))[0],
+  ).toBeVisible()
+  const prices = screen.getByRole('table')
+  const cache = within(prices).getByRole('row', { name: /Cache read tokens/ })
+  expect(
+    within(cache)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent),
+  ).toEqual(['322,304', '$0.00', '$0.00'])
+  const input = within(prices).getByRole('row', { name: /Input tokens/ })
+  expect(
+    within(input)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent),
+  ).toEqual(['403', '$0.80', '$0.0003224'])
+  expect(screen.getAllByText('$0.007228')).toHaveLength(2)
   expect(screen.queryByText(/HIDDEN_ADMIN|HIDDEN_ROOT/)).not.toBeInTheDocument()
+})
+
+it('uses the configured symbol and exchange rate for both calculated line costs and recorded totals', async () => {
+  await renderBilling(<RequestDetails log={log} />, {
+    quota_display_type: 'CUSTOM',
+    custom_currency_symbol: '◇',
+    custom_currency_exchange_rate: 2.5,
+  })
+  const table = screen.getByRole('table')
+  expect(
+    within(table).getByRole('columnheader', { name: 'Price per million tokens' }),
+  ).toBeVisible()
+  expect(within(table).getByRole('columnheader', { name: 'Cost' })).toBeVisible()
+  const input = within(table).getByRole('row', { name: /Input tokens/ })
+  expect(
+    within(input)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent),
+  ).toEqual(['403', '◇2.00', '◇0.000806'])
+  expect(screen.getAllByText('◇0.01807')).toHaveLength(2)
+})
+
+it('shows historical rates with missing billable quantities without inventing line amounts', async () => {
+  await renderBilling(
+    <BillingDetails
+      other={JSON.stringify({ ...recorded, billing_tokens: undefined })}
+      amount="$0.007228"
+    />,
+  )
+  const input = within(screen.getByRole('table')).getByRole('row', { name: /Input tokens/ })
+  expect(
+    within(input)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent),
+  ).toEqual(['—', '$0.80', '—'])
+  expect(screen.getByText('$0.007228')).toBeVisible()
 })
 
 it('keeps all preceding branch exclusions in a later tier instead of judging it from cached billable input', async () => {

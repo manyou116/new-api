@@ -74,14 +74,7 @@ describe('display locales and quota units', () => {
         { quota_per_unit: 500_000, quota_display_type: 'CNY', usd_exchange_rate: 7.25 },
         'zhCN',
       ),
-    ).toBe(
-      new Intl.NumberFormat('zh-CN', {
-        style: 'currency',
-        currency: 'CNY',
-        maximumFractionDigits: 6,
-        minimumFractionDigits: 2,
-      }).format(7.25),
-    )
+    ).toBe('¥7.25')
     expect(
       formatQuota(
         500_000,
@@ -124,6 +117,20 @@ describe('duration display', () => {
     for (const value of [undefined, null, NaN, Infinity, -1])
       expect(formatDurationMilliseconds(value, 'zhCN')).toBe('—')
   })
+  it.each(locales)(
+    'uses standard abbreviations and localized numbers in %s',
+    (language, canonical) => {
+      expect(formatDurationMilliseconds(800, language, 'abbreviated')).toBe('800 ms')
+      const seconds = new Intl.NumberFormat(canonical).format(1.5)
+      expect(formatDurationMilliseconds(1500, language, 'abbreviated')).toBe(`${seconds} s`)
+    },
+  )
+  it('keeps longer abbreviated durations legible and falls back for invalid locales', () => {
+    expect(formatDurationMilliseconds(8000, 'bad_locale', 'abbreviated')).toBe('8 s')
+    expect(formatDurationMilliseconds(60_000, 'zhCN', 'abbreviated')).toBe('1 min')
+    expect(formatDurationMilliseconds(3_600_000, 'zhTW', 'abbreviated')).toBe('1 h')
+    expect(formatDurationMilliseconds(undefined, 'zhCN', 'abbreviated')).toBe('—')
+  })
 })
 
 describe('balance display precision', () => {
@@ -132,6 +139,7 @@ describe('balance display precision', () => {
       new Intl.NumberFormat(canonical, {
         style: 'currency',
         currency: 'USD',
+        currencyDisplay: 'narrowSymbol',
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }).format(12.345678),
@@ -144,7 +152,7 @@ describe('balance display precision', () => {
         { quota_per_unit: 500000, quota_display_type: 'CNY', usd_exchange_rate: 7 },
         'en',
       ),
-    ).toBe('CN¥86.42')
+    ).toBe('¥86.42')
     expect(
       formatBalance(
         6172839,
@@ -166,5 +174,12 @@ describe('balance display precision', () => {
     expect(formatQuota(1, { quota_per_unit: 500000 }, 'en')).toBe('$0.000002')
     expect(formatMoney(0.000002, 'USD', 'en')).toBe('$0.000002')
     expect(formatBalance(0, { quota_per_unit: 500000 }, 'en')).toBe('$0.00')
+    expect(
+      formatQuota(
+        1,
+        { quota_per_unit: 500000, quota_display_type: 'CUSTOM', custom_currency_symbol: '◇' },
+        'zhCN',
+      ),
+    ).toBe('◇0.000002')
   })
 })

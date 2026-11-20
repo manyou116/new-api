@@ -2,12 +2,13 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatMoney, formatNumber } from '@/lib/format'
+import type { SiteStatus } from '@/lib/status'
 import { PriceExplanation } from '@/components/model-price'
 import { recordedTier } from './billing'
 import { usageCache, usageDetails } from './chart'
 
 /** Explicit public field list: never render arbitrary metadata or privileged scopes. */
-export function BillingDetails(props: { other: string }) {
+export function BillingDetails(props: { other: string; amount?: string; siteStatus?: SiteStatus }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const details = usageDetails(props.other)
@@ -51,6 +52,9 @@ export function BillingDetails(props: { other: string }) {
       conditionContent = <code className="billing-condition">{tier.conditions.join(' && ')}</code>
     }
   }
+  const groupRatio = details.user_group_ratio
+  const appliedGroupRatio =
+    typeof groupRatio === 'number' && groupRatio >= 0 ? groupRatio : details.group_ratio
   const tokenFields = [
     ['p', 'Billable input tokens'],
     ['c', 'Billable output tokens'],
@@ -63,8 +67,8 @@ export function BillingDetails(props: { other: string }) {
     ['ai', 'Billable audio input tokens'],
     ['ao', 'Billable audio output tokens'],
   ] as const
-  return (
-    <section className="stack billing-details" aria-label={t('Billing details')}>
+  const audit = (
+    <>
       <dl className="details-list">
         <div>
           <dt>{t('Pricing mode')}</dt>
@@ -121,41 +125,6 @@ export function BillingDetails(props: { other: string }) {
           )
         })}
       </dl>
-      {tier && (
-        <section className="billing-tier-summary" aria-label={t('Matched tier conditions')}>
-          <h3>{t('Matched tier conditions')}</h3>
-          <dl className="details-list">
-            <div>
-              <dt>{t('Pricing tier')}</dt>
-              <dd>
-                {typeof details.matched_tier === 'string' && details.matched_tier
-                  ? details.matched_tier
-                  : t('Not recorded')}
-              </dd>
-            </div>
-            <div>
-              <dt>{t('Matched tier conditions')}</dt>
-              <dd>{conditionContent}</dd>
-            </div>
-          </dl>
-          <h3>{t('Recorded pricing inputs')}</h3>
-          <dl className="details-list">
-            <div>
-              <dt>{t('Input context length')} (len)</dt>
-              <dd>
-                {typeof contextLength === 'number' &&
-                Number.isSafeInteger(contextLength) &&
-                contextLength >= 0
-                  ? formatNumber(contextLength, locale)
-                  : t('Not recorded')}
-              </dd>
-            </div>
-          </dl>
-        </section>
-      )}
-      {details.billing_mode === 'tiered_expr' && (
-        <PriceExplanation value={details.billing_explanation} historical />
-      )}
       {typeof details.request_path === 'string' && (
         <p>
           {t('Request path')}: <code>{details.request_path}</code>
@@ -233,6 +202,83 @@ export function BillingDetails(props: { other: string }) {
           'Recorded server billing data. Cache categories may overlap input tokens; amounts are not recalculated here.',
         )}
       </p>
+    </>
+  )
+  return (
+    <section className="stack billing-details" aria-label={t('Billing details')}>
+      {props.amount !== undefined && <h3>{t('Billing details')}</h3>}
+      {tier && (
+        <section className="billing-tier-summary" aria-label={t('Matched tier conditions')}>
+          <dl className="details-list">
+            <div>
+              <dt>{t('Pricing tier')}</dt>
+              <dd>
+                {typeof details.matched_tier === 'string' && details.matched_tier
+                  ? details.matched_tier
+                  : t('Not recorded')}
+              </dd>
+            </div>
+            <div>
+              <dt>{t('Matched tier conditions')}</dt>
+              <dd>{conditionContent}</dd>
+            </div>
+          </dl>
+
+          <dl className="details-list">
+            <div>
+              <dt>{t('Input context length')} (len)</dt>
+              <dd>
+                {typeof contextLength === 'number' &&
+                Number.isSafeInteger(contextLength) &&
+                contextLength >= 0
+                  ? formatNumber(contextLength, locale)
+                  : t('Not recorded')}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      )}
+      {details.billing_mode === 'tiered_expr' && (
+        <PriceExplanation
+          value={details.billing_explanation}
+          historical
+          quantities={props.amount !== undefined ? recordedTokens : undefined}
+          siteStatus={props.siteStatus}
+        />
+      )}
+      {props.amount !== undefined &&
+        tier &&
+        typeof appliedGroupRatio === 'number' &&
+        Number.isFinite(appliedGroupRatio) &&
+        appliedGroupRatio >= 0 && (
+          <div className="billing-receipt-ratio">
+            <span>{t('Group multiplier')}</span>
+            <span>{formatNumber(appliedGroupRatio, locale)}×</span>
+          </div>
+        )}
+      {props.amount !== undefined && (
+        <>
+          {details.billing_unit === 'token' && (
+            <p className="muted price-note">
+              {t(
+                'Line amounts show the token calculation. The recorded charge reflects settlement.',
+              )}
+            </p>
+          )}
+          <div className="billing-receipt-total">
+            <span>{t('Recorded amount')}</span>
+            <strong>{props.amount}</strong>
+          </div>
+        </>
+      )}
+      {props.amount !== undefined ? (
+        <details className="billing-receipt-audit">
+          <summary>{t('Recorded pricing inputs')}</summary>
+          <div className="stack">{audit}</div>
+        </details>
+      ) : (
+        audit
+      )}
     </section>
   )
 }

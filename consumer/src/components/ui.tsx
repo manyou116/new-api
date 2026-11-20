@@ -263,6 +263,7 @@ export function Modal(props: {
   description?: string
   children: ReactNode
   className?: string
+  backdropClassName?: string
 }) {
   const { t } = useTranslation()
   const id = useId()
@@ -274,7 +275,7 @@ export function Modal(props: {
       }}
     >
       <Dialog.Portal>
-        <Dialog.Backdrop className="modal-backdrop" />
+        <Dialog.Backdrop className={`modal-backdrop ${props.backdropClassName || ''}`} />
         <Dialog.Popup
           className={`modal ${props.className || ''}`}
           aria-describedby={props.description ? id : undefined}

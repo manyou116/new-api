@@ -1,6 +1,10 @@
 import { expect, it } from 'vitest'
 import { dailyUsage, type UsagePoint, usageDetails, usageMetric, usageCache } from '../chart'
 
+it('keeps missing cache metadata distinct from zero in a recorded token calculation', () => {
+  expect(usageCache('{"billing_tokens":{"len":100,"p":100,"cr":0,"cc":0}}', 100)).toBeUndefined()
+})
+
 it('groups hourly usage into local calendar days and includes empty days without moving the period', () => {
   const first = new Date(2026, 9, 18, 12).getTime() / 1000
   const second = new Date(2026, 9, 19, 0).getTime() / 1000

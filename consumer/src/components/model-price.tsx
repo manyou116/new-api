@@ -5,7 +5,8 @@ import { toIntlLocale } from '@/i18n/languages'
 import { getAuthSnapshot, subscribeAuth } from '@/lib/auth-state'
 import './model-price.css'
 import { request } from '@/lib/api'
-import { formatMoney, formatNumber } from '@/lib/format'
+import { formatDisplayCurrencyFromUSD, formatMoney, formatNumber } from '@/lib/format'
+import type { SiteStatus } from '@/lib/status'
 import { Button, Field, Input, Badge } from './ui'
 interface Quote {
   billing_explanation?: unknown
@@ -325,7 +326,12 @@ export function ModelPrice(props: {
 }
 
 /** Read-only server explanation; this component never calculates a bill. */
-export function PriceExplanation(props: { value: unknown; historical?: boolean }) {
+export function PriceExplanation(props: {
+  value: unknown
+  historical?: boolean
+  quantities?: Record<string, unknown>
+  siteStatus?: SiteStatus
+}) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const data =
@@ -361,6 +367,12 @@ export function PriceExplanation(props: { value: unknown; historical?: boolean }
       </p>
     )
   }
+  const unitPrices = Object.entries(labels).flatMap(([key, label]) => {
+    const rate: unknown = (prices as Record<string, unknown>)[key]
+    return typeof rate === 'number' && Number.isFinite(rate) && rate >= 0
+      ? [{ key, label, rate }]
+      : []
+  })
   return (
     <section aria-label={t('Token unit prices')}>
       <p className="price-note">
@@ -370,20 +382,61 @@ export function PriceExplanation(props: { value: unknown; historical?: boolean }
             : 'Current unit prices include the service plan multiplier.',
         )}
       </p>
-      <dl className="details-list">
-        {Object.entries(prices).map(([key, value]) => {
-          if (!labels[key] || typeof value !== 'number' || !Number.isFinite(value) || value < 0)
-            return null
-          return (
+      {props.quantities ? (
+        <div className="billing-price-scroll">
+          <table className="consumer-table billing-price-table">
+            <thead>
+              <tr>
+                <th scope="col">{t('Billing item')}</th>
+                <th scope="col">{t('Billable tokens')}</th>
+                <th scope="col">{t('Price per million tokens')}</th>
+                <th scope="col">{t('Cost')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {unitPrices.map(({ key, label, rate }) => {
+                const recorded = props.quantities?.[key]
+                const quantity =
+                  typeof recorded === 'number' && Number.isSafeInteger(recorded) && recorded >= 0
+                    ? recorded
+                    : undefined
+                const cost = quantity === undefined ? undefined : (quantity / 1_000_000) * rate
+                return (
+                  <tr key={key}>
+                    <th scope="row">{t(label)}</th>
+                    <td>{quantity === undefined ? '—' : formatNumber(quantity, locale)}</td>
+                    <td>
+                      {formatDisplayCurrencyFromUSD(rate, props.siteStatus, locale, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 8,
+                      })}
+                    </td>
+                    <td>
+                      {cost === undefined || !Number.isFinite(cost)
+                        ? '—'
+                        : formatDisplayCurrencyFromUSD(cost, props.siteStatus, locale, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 10,
+                          })}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <dl className="details-list">
+          {unitPrices.map(({ key, label, rate }) => (
             <div key={key}>
-              <dt>{t(labels[key])}</dt>
+              <dt>{t(label)}</dt>
               <dd>
-                {t('{{price}} per million tokens', { price: formatMoney(value, 'USD', locale) })}
+                {t('{{price}} per million tokens', { price: formatMoney(rate, 'USD', locale) })}
               </dd>
             </div>
-          )
-        })}
-      </dl>
+          ))}
+        </dl>
+      )}
       {Array.isArray(data.cache_included) && data.cache_included.length > 0 && (
         <p className="muted price-note">
           {t('Cache reads without a separate price use the input token price.')}

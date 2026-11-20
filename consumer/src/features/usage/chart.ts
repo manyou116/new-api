@@ -147,11 +147,15 @@ export function usageCache(other: string, promptTokens?: number) {
     tokens && typeof tokens === 'object' && !Array.isArray(tokens)
       ? (tokens as Record<string, unknown>)
       : {}
+  // Normalized calculation inputs can use zero for an unreported cache count.
+  const imageCache = recordedTokenCount(values.img_cr) ?? 0
+  const cacheSlice = recordedTokenCount(values.cr)
   const readValue =
     details.cache_tokens ??
-    (typeof values.cr === 'number' && typeof values.img_cr === 'number'
-      ? values.cr + values.img_cr
-      : values.cr)
+    (cacheSlice !== undefined &&
+    (cacheSlice > 0 || imageCache > 0 || details.image_cache_tokens !== undefined)
+      ? cacheSlice + imageCache
+      : undefined)
   const read = recordedTokenCount(readValue)
   const short = recordedTokenCount(details.cache_creation_tokens_5m)
   const long = recordedTokenCount(details.cache_creation_tokens_1h)
@@ -164,8 +168,11 @@ export function usageCache(other: string, promptTokens?: number) {
     // TTL counts are parts of the aggregate, not additional tokens.
     write = recordedTokenCount(Math.max(aggregate ?? 0, (short ?? 0) + (long ?? 0)))
   }
-  if (write === undefined && typeof values.cc === 'number') {
-    write = recordedTokenCount(values.cc + (typeof values.cc1h === 'number' ? values.cc1h : 0))
+  const billedWrite = recordedTokenCount(values.cc)
+  if (write === undefined && billedWrite !== undefined) {
+    const totalWrite = billedWrite + (recordedTokenCount(values.cc1h) ?? 0)
+    if (totalWrite > 0 || details.image_cache_tokens !== undefined)
+      write = recordedTokenCount(totalWrite)
   }
   let total = recordedTokenCount(values.len) ?? recordedTokenCount(details.input_tokens_total)
   const prompt = recordedTokenCount(promptTokens)

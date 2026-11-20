@@ -135,10 +135,21 @@ async function renderUsage(
   return fetch
 }
 
+async function showFilters() {
+  const button = screen.getByRole('button', { name: 'Filters' })
+  if (button.getAttribute('aria-expanded') === 'false') await userEvent.click(button)
+}
+
+async function showOverview() {
+  const summary = screen.getByText('Usage overview', { selector: 'summary' })
+  if (!summary.parentElement?.hasAttribute('open')) await userEvent.click(summary)
+}
+
 it('applies supported record filters on submit and keeps request IDs outside summary statistics', async () => {
   const fetch = await renderUsage()
   const user = userEvent.setup()
   await screen.findByText('fixture-chat')
+  await showFilters()
   await userEvent.setup().click(screen.getByRole('button', { name: 'More filters' }))
   await user.type(screen.getByRole('textbox', { name: 'API key name' }), 'Editor')
   await user.type(screen.getByRole('textbox', { name: 'Request ID' }), 'req-synthetic')
@@ -148,6 +159,7 @@ it('applies supported record filters on submit and keeps request IDs outside sum
         new URL(path, 'http://localhost').searchParams.get('request_id') === 'req-synthetic',
     ),
   ).toBe(false)
+  await showFilters()
   await user.click(screen.getByRole('combobox', { name: 'Record type' }))
   await user.click(await screen.findByRole('option', { name: 'Errors' }))
   await user.click(screen.getByRole('button', { name: 'Apply filters' }))
@@ -179,6 +191,8 @@ it('keeps common filters visible and preserves applied secondary filters while c
   const user = userEvent.setup()
   await screen.findByText('fixture-chat')
   expect(screen.getByRole('combobox', { name: 'Time period' })).toBeVisible()
+  expect(screen.queryByRole('combobox', { name: 'Service group' })).not.toBeInTheDocument()
+  await showFilters()
   expect(screen.getByRole('combobox', { name: 'Service group' })).toBeVisible()
   expect(screen.getByRole('combobox', { name: 'Model' })).toBeVisible()
   expect(screen.getByRole('combobox', { name: 'Record type' })).toBeVisible()
@@ -216,6 +230,7 @@ it('includes failures in the default history and exposes a persistent record-typ
       ),
   ).toBe(true)
   const user = userEvent.setup()
+  await showFilters()
   await user.click(screen.getByRole('combobox', { name: 'Record type' }))
   await user.click(await screen.findByRole('option', { name: 'Errors' }))
   await user.click(screen.getByRole('button', { name: 'Apply filters' }))
@@ -254,16 +269,18 @@ it.each([
       content: 'Public request error',
     })
     const row = await screen.findByRole('row', { name: /fixture-chat/ })
-    const status = within(row).getAllByText(label)[0]!
-    expect(status).toHaveAttribute('data-request-state', state)
-    expect(status).toBeVisible()
-    expect(status.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    if (state !== 'consumption' && state !== 'completed') {
+      const status = within(row).getByText(label)
+      expect(status).toHaveAttribute('data-request-state', state)
+      expect(status).toBeVisible()
+      expect(status.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    }
     if (type !== 2) {
       expect(within(row).queryByText(/Input \/ output tokens/)).not.toBeInTheDocument()
       expect(within(row).queryByText(/Cache read tokens/)).not.toBeInTheDocument()
       expect(within(row).queryByText(/Average output speed/)).not.toBeInTheDocument()
     }
-    await userEvent.setup().click(within(row).getByRole('button', { name: 'View' }))
+    await userEvent.setup().click(within(row).getByRole('button', { name: /^View request/ }))
     const dialog = await screen.findByRole('dialog', { name: 'Request details' })
     expect(within(dialog).getByText(label)).toBeVisible()
     if (type !== 2) {
@@ -293,8 +310,10 @@ it.each([
 it('shows public cache and billing details without exposing privileged metadata', async () => {
   await renderUsage()
   const user = userEvent.setup()
-  await user.click(await screen.findByRole('button', { name: 'View' }))
+  await user.click(await screen.findByRole('button', { name: /^View request/ }))
   const dialog = await screen.findByRole('dialog', { name: 'Request details' })
+  await user.click(within(dialog).getByText('Token usage', { selector: 'summary' }))
+  await user.click(within(dialog).getByText('Recorded pricing inputs', { selector: 'summary' }))
   expect(within(dialog).getAllByText('Cache read tokens')[0]).toBeVisible()
   expect(within(dialog).getAllByText('Cache write tokens')[0]).toBeVisible()
   expect(within(dialog).getByRole('region', { name: 'Token usage' })).toHaveTextContent('40%')
@@ -302,8 +321,11 @@ it('shows public cache and billing details without exposing privileged metadata'
   expect(within(dialog).getByText('Dynamic pricing')).toBeVisible()
   expect(within(dialog).getByText('Billable token breakdown')).toBeVisible()
   expect(dialog).not.toHaveTextContent('HIDDEN_')
-  const cacheWrite = within(dialog).getAllByText('Cache write tokens')[0].closest('div')
-  expect(cacheWrite).toHaveTextContent('120')
+  expect(
+    within(within(dialog).getByRole('region', { name: 'Token usage' }))
+      .getByText('Cache write tokens')
+      .closest('div'),
+  ).toHaveTextContent('120')
 })
 
 it.each([3, undefined])(
@@ -325,14 +347,14 @@ it.each([3, undefined])(
     const row = screen.getByRole('row', { name: /fixture-image/ })
     const expected = count === undefined ? 'Image count not recorded' : '3 images'
     expect(row).toHaveTextContent(expected)
-    expect(row).toHaveTextContent('Total duration: 4 sec')
+    expect(row).toHaveTextContent('Total duration: 4 s')
     expect(row).not.toHaveTextContent('Average output speed')
-    await userEvent.setup().click(within(row).getByRole('button', { name: 'View' }))
+    await userEvent.setup().click(within(row).getByRole('button', { name: /^View request/ }))
     const dialog = screen.getByRole('dialog', { name: 'Request details' })
     expect(dialog).toHaveTextContent(expected)
     expect(dialog).not.toHaveTextContent('First response latency')
     expect(dialog).not.toHaveTextContent('Average output speed')
-    expect(dialog).toHaveTextContent('Total duration4 sec')
+    expect(dialog).toHaveTextContent('Total duration4 s')
   },
 )
 
@@ -340,6 +362,7 @@ it('rejects a reversed custom time range without querying it and resets record f
   const fetch = await renderUsage()
   const user = userEvent.setup()
   await screen.findByText('fixture-chat')
+  await showFilters()
   await userEvent.setup().click(screen.getByRole('button', { name: 'More filters' }))
   await user.type(screen.getByRole('textbox', { name: 'Request ID' }), 'draft-only')
   const before = fetch.mock.calls.length
@@ -384,23 +407,35 @@ it('opens the server-provided creation request directly without narrowing aggreg
 
 it('shows historical server prices including explicit free cache without recomputing the total', async () => {
   await renderUsage()
-  await userEvent.setup().click(await screen.findByRole('button', { name: 'View' }))
+  await userEvent.setup().click(await screen.findByRole('button', { name: /^View request/ }))
   const dialog = await screen.findByRole('dialog')
-  expect(within(dialog).getByText('$0.00 per million tokens')).toBeVisible()
-  expect(within(dialog).getByText('$3.50 per million tokens')).toBeVisible()
+  const prices = within(dialog).getByRole('table')
+  const read = within(prices).getByRole('row', { name: /Cache read tokens/ })
+  expect(
+    within(read)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent),
+  ).toEqual(['400', '$0.00', '$0.00'])
+  const input = within(prices).getByRole('row', { name: /Input tokens/ })
+  expect(
+    within(input)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent),
+  ).toEqual(['480', '$3.50', '$0.00168'])
+  expect(within(dialog).getAllByText('$0.000002')).toHaveLength(2)
 })
 
 it('shows scoped cache totals and distinct streamed throughput, first-response and total timing', async () => {
   await renderUsage()
   await screen.findByText('fixture-chat')
+  await showOverview()
   expect(screen.getByText('Cache usage on this page')).toBeVisible()
   const cacheHelp = screen.getByText(/Cache counts cover this page only/)
   expect(cacheHelp).not.toBeVisible()
   await userEvent.setup().click(screen.getByText('Details', { selector: 'summary' }))
   expect(cacheHelp).toBeVisible()
-  expect(screen.getByText('50 token/s', { exact: false })).toBeVisible()
   expect(screen.getByRole('table')).toHaveTextContent(
-    'First response latency: 1 sec · Total duration: 4 sec',
+    /First response latency: 1 s\s*\/Total duration: 4 s/,
   )
   expect(screen.getByText('100%')).toBeVisible()
   expect(screen.getByText('Cache hit rate')).toBeVisible()
@@ -409,16 +444,18 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
     'cell',
   )[2]!
   expect(cacheCell).toHaveTextContent('Cache read tokens: 400')
-  expect(cacheCell).toHaveTextContent('40%')
+  expect(cacheCell).toHaveTextContent('Input tokens: 1,000')
+  await showOverview()
   expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute(
     'value',
     '100',
   )
-  await userEvent.setup().click(screen.getByRole('button', { name: 'View' }))
+  await userEvent.setup().click(screen.getByRole('button', { name: /^View request/ }))
   const dialog = screen.getByRole('dialog')
-  expect(dialog).toHaveTextContent('Total duration4 sec')
-  expect(dialog).toHaveTextContent('First response latency1 sec')
-  expect(dialog).toHaveTextContent('Average output speed50 token/s')
+  expect(dialog).toHaveTextContent('Total duration4 s')
+  expect(dialog).toHaveTextContent('First response latency1 s')
+  expect(dialog).toHaveTextContent('Average output speed: 50 token/s')
+  await userEvent.click(within(dialog).getByText('Token usage', { selector: 'summary' }))
   expect(within(dialog).queryByText('Cache hit rate')).not.toBeInTheDocument()
   expect(within(dialog).getByText('Cache read share')).toBeVisible()
   expect(within(dialog).getByText('Cached share of input tokens')).toBeVisible()
@@ -437,6 +474,7 @@ it('counts cache-hit requests independently of token sizes and excludes unknown,
     { other: '{"image_count":1,"cache_tokens":0}' },
   ])
   await screen.findByText('fixture-chat')
+  await showOverview()
   expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute('value', '50')
   expect(screen.getByText('1 / 2 requests hit cache')).toBeVisible()
   await userEvent.setup().click(screen.getByText('Details', { selector: 'summary' }))
@@ -450,6 +488,7 @@ it('counts a known cache hit even when its total input is unavailable', async ()
     other: '{"cache_tokens":400}',
   })
   await screen.findByText('fixture-chat')
+  await showOverview()
   expect(screen.getByRole('progressbar', { name: 'Cache hit rate' })).toHaveAttribute(
     'value',
     '100',
@@ -464,6 +503,7 @@ it.each([
 ])('distinguishes misses from unknown read counts in $other', async ({ other, rate, status }) => {
   await renderUsage(undefined, undefined, undefined, undefined, { other })
   await screen.findByText('fixture-chat')
+  await showOverview()
   if (rate === undefined)
     expect(screen.queryByRole('progressbar', { name: 'Cache hit rate' })).not.toBeInTheDocument()
   else
@@ -471,7 +511,7 @@ it.each([
       'value',
       rate,
     )
-  await userEvent.click(screen.getByRole('button', { name: 'View' }))
+  await userEvent.click(screen.getByRole('button', { name: /^View request/ }))
   expect(
     within(screen.getByRole('dialog')).getByText('Cache status').closest('div'),
   ).toHaveTextContent(status)
@@ -528,6 +568,7 @@ it('opens a key-specific history with precise identity, matching spending and al
       }),
     ).toBe(true),
   )
+  await showOverview()
   expect(screen.getByTestId('usage-chart-shell')).toBeVisible()
 })
 
@@ -535,7 +576,7 @@ it('shows missing text timings explicitly instead of inventing a first response 
   await renderUsage(undefined, undefined, undefined, undefined, { use_time: 0, other: '{}' })
   await screen.findByText('fixture-chat')
   expect(screen.getByRole('table')).toHaveTextContent(
-    'First response latency: Not recorded · Total duration: Not recorded',
+    /First response latency: —\s*\/Total duration: —/,
   )
 })
 
@@ -550,11 +591,11 @@ it('retains the table and paging controls while the next page loads and prevents
   const table = screen.getByRole('table')
   await user.click(screen.getByRole('button', { name: 'Next page' }))
   expect(screen.getByRole('table')).toBe(table)
-  expect(screen.getByRole('button', { name: 'View' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /^View request/ })).toBeDisabled()
   expect(screen.getByRole('status')).toHaveTextContent('Previous records remain visible')
   expect(screen.getByRole('navigation', { name: 'Pagination' })).toBeVisible()
   finish()
-  await waitFor(() => expect(screen.getByRole('button', { name: 'View' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: /^View request/ })).toBeEnabled())
 })
 
 it('does not label prior records as belonging to newly applied filters while loading', async () => {
@@ -565,6 +606,7 @@ it('does not label prior records as belonging to newly applied filters while loa
   await renderUsage(undefined, undefined, pending)
   const user = userEvent.setup()
   await screen.findByText('fixture-chat')
+  await showFilters()
   await userEvent.setup().click(screen.getByRole('button', { name: 'More filters' }))
   await user.type(screen.getByRole('textbox', { name: 'Request ID' }), 'changed-filter')
   await user.click(screen.getByRole('button', { name: 'Apply filters' }))
@@ -574,25 +616,64 @@ it('does not label prior records as belonging to newly applied filters while loa
   await screen.findByText('fixture-chat')
 })
 
-it('keeps token direction, cache, performance and precise cost in a five-column history', async () => {
-  await renderUsage()
-  await screen.findByText('fixture-chat')
+it('groups the eight fields into four columns and preserves the exact model ID in the keyboard-accessible drawer', async () => {
+  await renderUsage(undefined, undefined, undefined, undefined, {
+    model_name: 'gpt-6.2-sol',
+    use_time: 8,
+    other: '{"frt":800,"cache_tokens":400}',
+  })
+  const row = await screen.findByRole('row', { name: /GPT-6.2 Sol/ })
   const table = screen.getByRole('table')
-  expect(within(table).getAllByRole('columnheader')).toHaveLength(5)
-  expect(within(table).getByRole('columnheader', { name: /Input \/ output tokens/ })).toBeVisible()
-  expect(within(table).getByRole('columnheader', { name: 'Cache read tokens' })).toBeVisible()
-  const row = within(table).getAllByRole('row')[1]!
-  expect(row).toHaveTextContent('req-synthetic')
-  expect(row).toHaveTextContent('Editor')
-  expect(row).toHaveTextContent('50 token/s')
-  expect(row).toHaveTextContent('40%')
-  await userEvent.setup().click(within(row).getByRole('button', { name: 'View' }))
-  expect(
-    within(screen.getByRole('dialog')).getByRole('region', { name: 'Token usage' }),
-  ).toHaveTextContent('Input tokens1,000')
-  expect(
-    within(screen.getByRole('dialog')).getByRole('region', { name: 'Token usage' }),
-  ).toHaveTextContent('Output tokens200')
+  const headings = within(table).getAllByRole('columnheader')
+  expect(headings).toHaveLength(4)
+  expect(headings[1]).toHaveTextContent('First response / total duration')
+  expect(headings[2]).toHaveTextContent(/Input tokens.*Output tokens.*Cache read tokens/)
+  expect(row).toHaveTextContent(/First response latency: 800 ms.*Total duration: 8 s/)
+  expect(row).toHaveTextContent(/Input tokens: 1,000.*Output tokens: 200.*Cache read tokens: 400/)
+  expect(row).toHaveTextContent('$0.000002')
+  const trigger = within(row).getByRole('button', { name: 'View request req-synthetic' })
+  expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
+  trigger.focus()
+  await userEvent.keyboard('{Enter}')
+  const dialog = screen.getByRole('dialog', { name: 'Request details' })
+  expect(within(dialog).getByText('GPT-6.2 Sol')).toBeVisible()
+  expect(within(dialog).getByText('gpt-6.2-sol')).toBeVisible()
+  await userEvent.keyboard('{Escape}')
+  expect(trigger).toHaveFocus()
+})
+
+it.each([
+  [9_999, 'good'],
+  [10_000, 'warn'],
+  [29_999, 'warn'],
+  [30_000, 'slow'],
+  [59_999, 'slow'],
+  [60_000, 'critical'],
+  [undefined, undefined],
+])('applies the same first-response color for %s ms in the row and drawer', async (frt, band) => {
+  await renderUsage(undefined, undefined, undefined, undefined, {
+    use_time: 70,
+    other: JSON.stringify({ frt }),
+  })
+  const row = await screen.findByRole('row', { name: /fixture-chat/ })
+  const firstInRow = within(row).getByTitle('First response latency')
+  await userEvent.click(within(row).getByRole('button', { name: 'View request req-synthetic' }))
+  const details = screen.getByRole('region', { name: 'Response performance' })
+  const firstInDetails = within(details).getByText('First response latency').nextElementSibling
+
+  if (band) {
+    expect(firstInRow).toHaveAttribute('data-latency', band)
+    expect(firstInDetails).toHaveAttribute('data-latency', band)
+  } else {
+    expect(firstInRow).toHaveTextContent('—')
+    expect(firstInDetails).toHaveTextContent('—')
+    expect(firstInRow).not.toHaveAttribute('data-latency')
+    expect(firstInDetails).not.toHaveAttribute('data-latency')
+  }
+  expect(within(row).getByTitle('Total duration')).not.toHaveAttribute('data-latency')
+  expect(within(details).getByText('Total duration').nextElementSibling).not.toHaveAttribute(
+    'data-latency',
+  )
 })
 
 it('rounds the overview amount while retaining the exact recorded amount on request rows', async () => {
@@ -600,7 +681,8 @@ it('rounds the overview amount while retaining the exact recorded amount on requ
   await screen.findByText('fixture-chat')
   const summary = screen.getByRole('region', { name: 'Usage overview' })
   expect(within(summary).getByText('$0.00')).toHaveAttribute('title', '$0.000002')
-  expect(within(summary).getAllByText('Recent rate, not the total for this period')).toHaveLength(2)
+  await showOverview()
+  expect(screen.getAllByText('Recent rate, not the total for this period')).toHaveLength(2)
   expect(screen.getByRole('row', { name: /fixture-chat/ })).toHaveTextContent('$0.000002')
 })
 
@@ -610,7 +692,7 @@ it('keeps long request identifiers available in the detail and returns focus aft
     model_name: 'long-model-name-'.repeat(15),
     request_id: identifier,
   })
-  const button = await screen.findByRole('button', { name: 'View' })
+  const button = await screen.findByRole('button', { name: /^View request/ })
   await userEvent.setup().click(button)
   const dialog = screen.getByRole('dialog', { name: 'Request details' })
   expect(within(dialog).getByText(identifier)).toBeVisible()
@@ -622,6 +704,7 @@ it('cancels calendar edits without applying a filter and clears an applied date 
   await renderUsage()
   const user = userEvent.setup()
   await screen.findByText('fixture-chat')
+  await showFilters()
   await userEvent.setup().click(screen.getByRole('button', { name: 'More filters' }))
   await user.click(screen.getByRole('button', { name: 'From' }))
   let dialog = screen.getByRole('dialog', { name: 'From' })
@@ -657,6 +740,7 @@ it('keeps metric and chart shells mounted while scoped summaries load without di
   })
   await renderUsage(undefined, undefined, undefined, delayed)
   await screen.findByText('fixture-chat')
+  await showFilters()
   await userEvent.setup().click(screen.getByRole('button', { name: 'More filters' }))
   const metrics = screen.getByTestId('usage-summary')
   const chart = screen.getByTestId('usage-chart-shell')
@@ -678,14 +762,15 @@ it('keeps the spending shell but removes previous-range chart values until the n
   })
   await renderUsage(undefined, undefined, undefined, delayed)
   await screen.findByText('fixture-chat')
+  await showOverview()
   const chart = screen.getByTestId('usage-chart-shell')
+  await userEvent.setup().click(within(chart).getByText('Your spending over time'))
   await waitFor(() =>
     expect(within(chart).getByRole('group', { name: 'Daily spending chart' })).toBeVisible(),
   )
   const user = userEvent.setup()
   await user.click(screen.getByRole('combobox', { name: 'Time period' }))
   await user.click(await screen.findByRole('option', { name: 'Last 24 hours' }))
-  await user.click(screen.getByRole('button', { name: 'Apply filters' }))
   expect(screen.getByTestId('usage-chart-shell')).toBe(chart)
   expect(chart).toHaveAttribute('aria-busy', 'true')
   expect(
@@ -706,6 +791,7 @@ it('cancels a pending records query when the user applies a different filter', a
   const fetch = await renderUsage(undefined, undefined, delayed)
   await screen.findByText('fixture-chat')
   const user = userEvent.setup()
+  await showFilters()
   await user.click(screen.getByRole('button', { name: 'More filters' }))
   await user.type(screen.getByRole('textbox', { name: 'Request ID' }), 'changed-filter')
   await user.click(screen.getByRole('button', { name: 'Apply filters' }))
@@ -734,7 +820,6 @@ it('cancels pending spending and chart queries when their filters are replaced',
   const user = userEvent.setup()
   await user.click(screen.getByRole('combobox', { name: 'Time period' }))
   await user.click(await screen.findByRole('option', { name: 'Last 24 hours' }))
-  await user.click(screen.getByRole('button', { name: 'Apply filters' }))
   const reads = fetch.mock.calls.filter(
     ([path]) => path.startsWith('/api/log/self/stat?') || path.startsWith('/api/data/self?'),
   )
@@ -745,7 +830,6 @@ it('cancels pending spending and chart queries when their filters are replaced',
   )
   await user.click(screen.getByRole('combobox', { name: 'Time period' }))
   await user.click(await screen.findByRole('option', { name: 'Last 7 days' }))
-  await user.click(screen.getByRole('button', { name: 'Apply filters' }))
   expect(summarySignals.every((signal) => signal?.aborted)).toBe(true)
   finish()
 })

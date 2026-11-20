@@ -1,35 +1,57 @@
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronRight, Database, Image as ImageIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Badge, Button } from '@/components/ui'
+import { Button } from '@/components/ui'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatDate, formatDurationMilliseconds, formatNumber, formatQuota } from '@/lib/format'
 import { useStatus } from '@/lib/status'
-import { usageCache, usageMetric, usageTiming } from './chart'
+import { usageCache, usageDetails, usageMetric, usageTiming } from './chart'
 import { RequestStatus } from './RequestDetails'
+import { latencyBand, usageModelName } from './presentation'
 import type { UsageLog } from './UsagePage'
 
 export function UsageRecords(props: {
   logs: UsageLog[]
   busy: boolean
   stale: boolean
+  selectedID?: number
   onSelect: (log: UsageLog) => void
 }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const site = useStatus()
+  const timingLabel = t('First response / total duration')
   return (
     <div className="usage-records" aria-busy={props.busy}>
       <table className="consumer-table usage-record-table">
         <thead>
           <tr>
-            <th>{t('Request')}</th>
-            <th>
-              {t('Usage quantity')}
-              <small className="cache-rate-caption">{t('Input / output tokens')}</small>
+            <th scope="col">{t('Model / time')}</th>
+            <th
+              scope="col"
+              title={t(
+                'Time to the first upstream stream event; this may precede the first text token.',
+              )}
+            >
+              {timingLabel}
             </th>
-            <th>{t('Cache read tokens')}</th>
-            <th>{t('Cost')}</th>
-            <th>{t('Details')}</th>
+            <th scope="col">
+              {t('Usage quantity')}
+              <span className="usage-token-legend">
+                <span>
+                  <ArrowDown aria-hidden="true" />
+                  {t('Input tokens')}
+                </span>
+                <span>
+                  <ArrowUp aria-hidden="true" />
+                  {t('Output tokens')}
+                </span>
+                <span>
+                  <Database aria-hidden="true" />
+                  {t('Cache read tokens')}
+                </span>
+              </span>
+            </th>
+            <th scope="col">{t('Cost')}</th>
           </tr>
         </thead>
         <tbody>
@@ -37,120 +59,97 @@ export function UsageRecords(props: {
             const metric = usageMetric(log)
             const timing = usageTiming(log)
             const cache = log.type === 2 ? usageCache(log.other, log.prompt_tokens) : undefined
+            const stream = usageDetails(log.other).stream_status
+            const showStatus =
+              log.type !== 2 ||
+              (typeof stream === 'object' &&
+                stream !== null &&
+                'status' in stream &&
+                stream.status === 'error')
+            const first = timing.firstResponse
+            const duration = timing.duration
             return (
-              <tr key={log.id}>
-                <td data-label={t('Request')}>
+              <tr key={log.id} data-selected={props.selectedID === log.id || undefined}>
+                <td>
                   <div className="usage-context">
-                    <strong title={log.model_name}>{log.model_name || '—'}</strong>
+                    <strong title={log.model_name}>{usageModelName(log.model_name)}</strong>
                     <span className="usage-record-date">{formatDate(log.created_at, locale)}</span>
-                    <div className="usage-record-tags">
-                      {log.group && <Badge>{log.group}</Badge>}
-                      <RequestStatus log={log} />
-                      <span title={log.token_name}>{log.token_name || t('Website')}</span>
-                    </div>
-                    <small className="usage-record-id" title={log.request_id}>
-                      {log.request_id}
-                    </small>
+                    {showStatus && <RequestStatus log={log} />}
                   </div>
                 </td>
-                <td
-                  data-label={t(
-                    metric.kind === 'tokens' ? 'Input / output tokens' : 'Usage quantity',
+                <td data-label={timingLabel}>
+                  <div className="usage-record-timing">
+                    <span data-latency={latencyBand(first)} title={t('First response latency')}>
+                      <span className="sr-only">{t('First response latency')}: </span>
+                      {formatDurationMilliseconds(
+                        first === undefined ? undefined : first * 1000,
+                        locale,
+                        'abbreviated',
+                      )}
+                    </span>
+                    <span className="muted" aria-hidden="true">
+                      /
+                    </span>
+                    <span title={t('Total duration')}>
+                      <span className="sr-only">{t('Total duration')}: </span>
+                      {formatDurationMilliseconds(
+                        duration === undefined ? undefined : duration * 1000,
+                        locale,
+                        'abbreviated',
+                      )}
+                    </span>
+                  </div>
+                </td>
+                <td data-label={t('Usage quantity')}>
+                  {log.type !== 2 && '—'}
+                  {log.type === 2 && metric.kind === 'images' && (
+                    <span className="usage-token-value">
+                      <ImageIcon aria-hidden="true" />
+                      {metric.count === undefined
+                        ? t('Image count not recorded')
+                        : t('{{count}} images', { count: formatNumber(metric.count, locale) })}
+                    </span>
                   )}
-                >
-                  <div className="usage-record-metrics">
-                    {log.type !== 2 && <span>—</span>}
-                    {log.type === 2 && metric.kind === 'images' && (
-                      <>
-                        <strong>
-                          {metric.count === undefined
-                            ? t('Image count not recorded')
-                            : t('{{count}} images', { count: formatNumber(metric.count, locale) })}
-                        </strong>
-                        <span>
-                          {t('Total duration')}:{' '}
-                          {formatDurationMilliseconds(
-                            timing.duration === undefined ? undefined : timing.duration * 1000,
-                            locale,
-                          )}
+                  {log.type === 2 && metric.kind === 'tokens' && (
+                    <div className="usage-token-stack">
+                      <div className="usage-token-pair">
+                        <span className="usage-token-value" title={t('Input tokens')}>
+                          <ArrowDown aria-hidden="true" />
+                          <span className="sr-only">{t('Input tokens')}: </span>
+                          {formatNumber(cache?.total ?? log.prompt_tokens, locale)}
                         </span>
-                      </>
-                    )}
-                    {log.type === 2 && metric.kind === 'tokens' && (
-                      <>
-                        <strong>
-                          <span className="sr-only">{t('Input / output tokens')}: </span>
-                          {formatNumber(cache?.total ?? log.prompt_tokens, locale)} /{' '}
+                        <span className="usage-token-value" title={t('Output tokens')}>
+                          <ArrowUp aria-hidden="true" />
+                          <span className="sr-only">{t('Output tokens')}: </span>
                           {formatNumber(log.completion_tokens, locale)}
-                        </strong>
-                        <span
-                          title={t(
-                            'Speed includes waiting time; only streamed text with recorded output and duration is measured.',
-                          )}
-                        >
-                          <span className="sr-only">{t('Average output speed')}: </span>
-                          {timing.tokensPerSecond === undefined
-                            ? '—'
-                            : `${formatNumber(timing.tokensPerSecond, locale, { maximumFractionDigits: 2 })} token/s`}
-                          {timing.tokensPerSecond === undefined &&
-                            log.completion_tokens === 0 &&
-                            ` · ${t('No output tokens recorded')}`}
                         </span>
-                        <span className="usage-record-timing">
-                          {t('First response latency')}:{' '}
-                          {timing.firstResponse === undefined
-                            ? t('Not recorded')
-                            : formatDurationMilliseconds(timing.firstResponse * 1000, locale)}
-                          {' · '}
-                          {t('Total duration')}:{' '}
-                          {timing.duration === undefined
-                            ? t('Not recorded')
-                            : formatDurationMilliseconds(timing.duration * 1000, locale)}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </td>
-                <td data-label={t('Cache read tokens')}>
-                  {log.type === 2 && metric.kind === 'tokens' ? (
-                    <div className="usage-record-metrics">
-                      <strong>
+                      </div>
+                      <span
+                        className="usage-token-value usage-token-cache"
+                        title={t('Cache read tokens')}
+                      >
+                        <Database aria-hidden="true" />
                         <span className="sr-only">{t('Cache read tokens')}: </span>
-                        {cache?.read === undefined
-                          ? t('Not recorded')
-                          : formatNumber(cache.read, locale)}
-                      </strong>
-                      {cache?.share !== undefined && (
-                        <span>
-                          {formatNumber(cache.share, locale, { maximumFractionDigits: 1 })}%
-                          <small className="cache-rate-caption">
-                            {t('Cached share of input tokens')}
-                          </small>
-                        </span>
-                      )}
-                      {cache?.write !== undefined && (
-                        <span>
-                          {t('Cache write tokens')}: {formatNumber(cache.write, locale)}
-                        </span>
-                      )}
+                        {cache?.read === undefined ? '—' : formatNumber(cache.read, locale)}
+                      </span>
                     </div>
-                  ) : (
-                    '—'
                   )}
                 </td>
                 <td data-label={t('Cost')} className="usage-record-cost">
-                  {formatQuota(log.quota, site.data, locale)}
-                </td>
-                <td data-label={t('Details')} className="usage-record-action">
-                  <Button
-                    disabled={props.stale}
-                    variant="ghost"
-                    title={t('View request {{id}}', { id: log.request_id || log.id })}
-                    onClick={() => props.onSelect(log)}
-                  >
-                    <span>{t('View')}</span>
-                    <ArrowUpRight size={15} aria-hidden />
-                  </Button>
+                  <div>
+                    {formatQuota(log.quota, site.data, locale)}
+                    <Button
+                      className="icon-button usage-record-open"
+                      disabled={props.stale}
+                      variant="ghost"
+                      aria-haspopup="dialog"
+                      aria-label={t('View request {{id}}', { id: log.request_id || log.id })}
+                      title={t('View')}
+                      onClick={() => props.onSelect(log)}
+                    >
+                      <ChevronRight size={16} aria-hidden="true" />
+                    </Button>
+                  </div>
                 </td>
               </tr>
             )
