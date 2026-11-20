@@ -1,4 +1,11 @@
-import { ArrowDown, ArrowUp, ChevronRight, Database, Image as ImageIcon } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronRight,
+  Database,
+  Layers2,
+  Image as ImageIcon,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui'
 import { toIntlLocale } from '@/i18n/languages'
@@ -26,6 +33,7 @@ export function UsageRecords(props: {
         <thead>
           <tr>
             <th scope="col">{t('Model / time')}</th>
+            <th scope="col">{t('API key / charged group')}</th>
             <th
               scope="col"
               title={t(
@@ -75,6 +83,15 @@ export function UsageRecords(props: {
                     <strong title={log.model_name}>{usageModelName(log.model_name)}</strong>
                     <span className="usage-record-date">{formatDate(log.created_at, locale)}</span>
                     {showStatus && <RequestStatus log={log} />}
+                  </div>
+                </td>
+                <td data-label={t('API key / charged group')}>
+                  <div className="usage-context">
+                    <span className="usage-key-name">{log.token_name || '—'}</span>
+                    <span className="usage-charged-group">
+                      <Layers2 size={12} aria-hidden />
+                      {log.group || '—'}
+                    </span>
                   </div>
                 </td>
                 <td data-label={timingLabel}>

@@ -425,16 +425,19 @@
   font-size: 12px;
 }
 .usage-record-table th:first-child {
-  width: 28%;
+  width: 23%;
 }
 .usage-record-table th:nth-child(2) {
-  width: 24%;
+  width: 19%;
 }
 .usage-record-table th:nth-child(3) {
-  width: 30%;
+  width: 18%;
+}
+.usage-record-table th:nth-child(4) {
+  width: 24%;
 }
 .usage-record-table th:last-child {
-  width: 18%;
+  width: 16%;
   text-align: right;
 }
 .usage-record-table th {
@@ -471,6 +474,18 @@
 .usage-record-date {
   font-size: 11px;
   color: var(--muted);
+}
+.usage-key-name {
+  font-weight: 550;
+}
+.usage-charged-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.usage-charged-group svg {
+  flex-shrink: 0;
 }
 .usage-record-tags {
   display: flex;
@@ -787,6 +802,9 @@
   .usage-record-table tbody td:nth-child(3) {
     grid-column: 2;
   }
+  .usage-record-table tbody td:nth-child(4) {
+    grid-column: 1 / -1;
+  }
   .usage-record-table tbody td[data-label]::before {
     content: attr(data-label);
     display: block;
@@ -1048,4 +1066,36 @@
 }
 .request-throughput {
   font-size: 12px;
+}
+
+.usage-tier-receipt {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.usage-tier-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.usage-tier-caption:not(:first-child) {
+  margin-top: 12px;
+}
+.usage-tier-caption h4 {
+  margin: 0;
+  font-size: 14px;
+}
+.usage-tier-caption span,
+.usage-tier-receipt th small {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+}
+.usage-tier-receipt th small {
+  display: block;
+}
+.usage-tier-receipt tr[data-matched='true'] {
+  background: var(--green);
 }

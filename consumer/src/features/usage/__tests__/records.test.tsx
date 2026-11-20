@@ -440,9 +440,9 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
   expect(screen.getByText('100%')).toBeVisible()
   expect(screen.getByText('Cache hit rate')).toBeVisible()
   expect(screen.getByText('Cached share of input tokens: 40%')).toBeVisible()
-  const cacheCell = within(screen.getByRole('row', { name: /fixture-chat/ })).getAllByRole(
-    'cell',
-  )[2]!
+  const cacheCell = within(screen.getByRole('row', { name: /fixture-chat/ })).getByRole('cell', {
+    name: /Cache read tokens:\s*400/,
+  })
   expect(cacheCell).toHaveTextContent('Cache read tokens: 400')
   expect(cacheCell).toHaveTextContent('Input tokens: 1,000')
   await showOverview()
@@ -616,7 +616,7 @@ it('does not label prior records as belonging to newly applied filters while loa
   await screen.findByText('fixture-chat')
 })
 
-it('groups the eight fields into four columns and preserves the exact model ID in the keyboard-accessible drawer', async () => {
+it('groups request metrics, API key and charged group into five columns and preserves the exact model ID in the keyboard-accessible drawer', async () => {
   await renderUsage(undefined, undefined, undefined, undefined, {
     model_name: 'gpt-6.2-sol',
     use_time: 8,
@@ -625,9 +625,11 @@ it('groups the eight fields into four columns and preserves the exact model ID i
   const row = await screen.findByRole('row', { name: /GPT-6.2 Sol/ })
   const table = screen.getByRole('table')
   const headings = within(table).getAllByRole('columnheader')
-  expect(headings).toHaveLength(4)
-  expect(headings[1]).toHaveTextContent('First response / total duration')
-  expect(headings[2]).toHaveTextContent(/Input tokens.*Output tokens.*Cache read tokens/)
+  expect(headings).toHaveLength(5)
+  expect(headings[1]).toHaveTextContent('API key / charged group')
+  expect(within(row).getAllByRole('cell')[1]).toHaveTextContent(/Editor.*default/)
+  expect(headings[2]).toHaveTextContent('First response / total duration')
+  expect(headings[3]).toHaveTextContent(/Input tokens.*Output tokens.*Cache read tokens/)
   expect(row).toHaveTextContent(/First response latency: 800 ms.*Total duration: 8 s/)
   expect(row).toHaveTextContent(/Input tokens: 1,000.*Output tokens: 200.*Cache read tokens: 400/)
   expect(row).toHaveTextContent('$0.000002')

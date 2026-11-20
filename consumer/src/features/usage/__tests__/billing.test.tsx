@@ -254,3 +254,43 @@ it.each([
     expect(performance).not.toHaveTextContent('Time to the first upstream stream event')
   },
 )
+
+it.each([
+  { progressive: true, amounts: ['$0.0272', '$0.0056'], total: '$0.0328' },
+  { progressive: false, amounts: ['$0.06'], total: '$0.06' },
+])(
+  'shows only the recorded input calculation for progressive=$progressive',
+  async ({ progressive, amounts, total }) => {
+    await renderBilling(
+      <RequestDetails
+        log={{
+          ...log,
+          quota: progressive ? 16400 : 30000,
+          other: JSON.stringify({
+            ...recorded,
+            group_ratio: 1,
+            billing_tokens: { len: 300000, p: 300000, c: 0 },
+            billing_explanation: {
+              status: progressive ? 'not_separable' : 'available',
+              context_rates: {
+                threshold: 272000,
+                within_label: 'standard',
+                above_label: 'long_context',
+                progressive_input: progressive,
+                within: { p: 0.1, c: 0.5 },
+                above: { p: 0.2, c: 0.75 },
+              },
+            },
+          }),
+        }}
+      />,
+    )
+    const schedule = screen.getByRole('table', { name: 'Tier prices' })
+    expect(schedule).toHaveTextContent('272,000')
+    const lines = screen.getByRole('table', { name: 'Charge calculation' })
+    for (const amount of amounts) expect(within(lines).getByText(amount)).toBeVisible()
+    expect(lines).toHaveTextContent(progressive ? '28,000' : '300,000')
+    const receipt = screen.getByRole('region', { name: 'Billing details' })
+    expect(within(receipt).getByText('Recorded amount').parentElement).toHaveTextContent(total)
+  },
+)

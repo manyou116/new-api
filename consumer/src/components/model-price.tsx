@@ -325,6 +325,19 @@ export function ModelPrice(props: {
   )
 }
 
+export const tokenPriceLabels: Record<string, string> = {
+  p: 'Input tokens',
+  c: 'Output tokens',
+  cr: 'Cache read tokens',
+  cc: 'Cache write tokens',
+  cc1h: 'Cache write tokens (1h)',
+  img: 'Billable image input tokens',
+  img_o: 'Billable image output tokens',
+  img_cr: 'Image cache tokens',
+  ai: 'Audio input tokens',
+  ao: 'Billable audio output tokens',
+}
+
 /** Read-only server explanation; this component never calculates a bill. */
 export function PriceExplanation(props: {
   value: unknown
@@ -339,18 +352,7 @@ export function PriceExplanation(props: {
       ? (props.value as Record<string, unknown>)
       : {}
   const prices = data.unit_prices
-  const labels: Record<string, string> = {
-    p: 'Input tokens',
-    c: 'Output tokens',
-    cr: 'Cache read tokens',
-    cc: 'Cache write tokens',
-    cc1h: 'Cache write tokens (1h)',
-    img: 'Billable image input tokens',
-    img_o: 'Billable image output tokens',
-    img_cr: 'Image cache tokens',
-    ai: 'Audio input tokens',
-    ao: 'Billable audio output tokens',
-  }
+
   if (
     data.status !== 'available' ||
     !prices ||
@@ -367,7 +369,7 @@ export function PriceExplanation(props: {
       </p>
     )
   }
-  const unitPrices = Object.entries(labels).flatMap(([key, label]) => {
+  const unitPrices = Object.entries(tokenPriceLabels).flatMap(([key, label]) => {
     const rate: unknown = (prices as Record<string, unknown>)[key]
     return typeof rate === 'number' && Number.isFinite(rate) && rate >= 0
       ? [{ key, label, rate }]

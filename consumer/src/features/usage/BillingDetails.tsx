@@ -4,7 +4,8 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatMoney, formatNumber } from '@/lib/format'
 import type { SiteStatus } from '@/lib/status'
 import { PriceExplanation } from '@/components/model-price'
-import { recordedTier } from './billing'
+import { recordedContextRates, recordedTier } from './billing'
+import { ContextTierReceipt } from './ContextTierReceipt'
 import { usageCache, usageDetails } from './chart'
 
 /** Explicit public field list: never render arbitrary metadata or privileged scopes. */
@@ -45,6 +46,10 @@ export function BillingDetails(props: { other: string; amount?: string; siteStat
       ? (billingTokens as Record<string, unknown>)
       : {}
   const contextLength = recordedTokens.len ?? details.input_tokens_total
+  const rates =
+    tier && props.amount !== undefined && details.billing_unit === 'token'
+      ? recordedContextRates(details.billing_explanation, recordedTokens.len, details.matched_tier)
+      : undefined
   let conditionContent: ReactNode = t('Tier conditions were not recorded or could not be read.')
   if (tier?.conditions) {
     conditionContent = t('No tier condition')
@@ -207,7 +212,7 @@ export function BillingDetails(props: { other: string; amount?: string; siteStat
   return (
     <section className="stack billing-details" aria-label={t('Billing details')}>
       {props.amount !== undefined && <h3>{t('Billing details')}</h3>}
-      {tier && (
+      {tier && !rates && (
         <section className="billing-tier-summary" aria-label={t('Matched tier conditions')}>
           <dl className="details-list">
             <div>
@@ -238,7 +243,15 @@ export function BillingDetails(props: { other: string; amount?: string; siteStat
           </dl>
         </section>
       )}
-      {details.billing_mode === 'tiered_expr' && (
+      {rates && typeof recordedTokens.len === 'number' && (
+        <ContextTierReceipt
+          rates={rates}
+          length={recordedTokens.len}
+          quantities={recordedTokens}
+          siteStatus={props.siteStatus}
+        />
+      )}
+      {details.billing_mode === 'tiered_expr' && !rates && (
         <PriceExplanation
           value={details.billing_explanation}
           historical

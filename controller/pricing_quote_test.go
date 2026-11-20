@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -520,5 +522,39 @@ func TestPricingQuoteLegacyImageBasePrice(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, string(encoded), "base_price_usd")
 		assert.Nil(t, quotes[0].USD)
+	}
+}
+
+func TestRecordedContextRatesFollowSettledExpression(t *testing.T) {
+	const linear = `len <= 272000 ? tier("standard", p * 0.1 + c * 0.5 + cr * 0.01 + cc * 0.125) : tier("long_context", p * 0.2 + c * 0.75 + cr * 0.02 + cc * 0.25)`
+	progressive := strings.Replace(linear, "p * 0.2", "p * 0.1 + max(p - 272000, 0) * 0.1", 1)
+	for _, tc := range []struct {
+		expression  string
+		usage       billingexpr.TokenParams
+		wantQuota   int
+		progressive bool
+	}{
+		{progressive, billingexpr.TokenParams{P: 24000, CR: 8000, C: 1200, Len: 32000}, 1540, true},
+		{progressive, billingexpr.TokenParams{P: 272000, C: 2300, Len: 272000}, 14175, true},
+		{progressive, billingexpr.TokenParams{P: 300000, Len: 300000}, 16400, true},
+		{linear, billingexpr.TokenParams{P: 300000, Len: 300000}, 30000, false},
+	} {
+		snapshot := &billingexpr.BillingSnapshot{ExprString: tc.expression, ExprHash: billingexpr.ExprHashString(tc.expression), GroupRatio: 1, QuotaPerUnit: 500000}
+		settled, err := billingexpr.ComputeTieredQuota(snapshot, tc.usage)
+		require.NoError(t, err)
+		assert.Equal(t, tc.wantQuota, settled.ActualQuotaAfterGroup)
+		result := explainTokenPrices(tc.expression, settled.MatchedTier, snapshot.GroupRatio)
+		require.NotNil(t, result.ContextRates)
+		assert.Equal(t, tc.progressive, result.ContextRates.ProgressiveInput)
+		assert.Equal(t, 272000, result.ContextRates.Threshold)
+		assert.InDelta(t, 0.2, result.ContextRates.Above["p"], 1e-12)
+	}
+	for _, invalid := range []string{
+		strings.Replace(progressive, "p - 272000", "p - 270000", 1),
+		strings.Replace(progressive, "max(p -", "min(p -", 1),
+		progressive + " * 2",
+		strings.Replace(progressive, "long_context", "standard", 1),
+	} {
+		assert.Nil(t, explainTokenPrices(invalid, "standard", 1).ContextRates)
 	}
 }
