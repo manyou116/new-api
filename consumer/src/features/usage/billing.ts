@@ -144,3 +144,57 @@ export function recordedTier(details: Record<string, unknown>): RecordedTier {
     conditions: matches?.length === 1 ? matches[0].conditions : null,
   }
 }
+
+interface ContextRates {
+  threshold: number
+  within_label: string
+  above_label: string
+  progressive_input: boolean
+  within: Record<string, number>
+  above: Record<string, number>
+}
+
+function isRateMap(value: unknown): value is Record<string, number> {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.values(value).every(
+      (rate) => typeof rate === 'number' && Number.isFinite(rate) && rate >= 0,
+    )
+  )
+}
+
+/** Display a schedule only when the saved settlement agrees with its context band. */
+export function recordedContextRates(
+  explanation: unknown,
+  length: unknown,
+  matched: unknown,
+): ContextRates | undefined {
+  if (!explanation || typeof explanation !== 'object' || !('context_rates' in explanation)) return
+  const rates = explanation.context_rates
+  if (
+    !rates ||
+    typeof rates !== 'object' ||
+    typeof length !== 'number' ||
+    !Number.isSafeInteger(length) ||
+    length < 0
+  )
+    return
+  const r = rates as Partial<ContextRates>
+  if (
+    typeof r.threshold !== 'number' ||
+    !Number.isSafeInteger(r.threshold) ||
+    r.threshold <= 0 ||
+    typeof r.progressive_input !== 'boolean' ||
+    typeof r.within_label !== 'string' ||
+    typeof r.above_label !== 'string' ||
+    !isRateMap(r.within) ||
+    !isRateMap(r.above) ||
+    matched !== (length <= r.threshold ? r.within_label : r.above_label)
+  )
+    return
+  return r as ContextRates
+}
+
+export type { ContextRates }
