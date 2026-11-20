@@ -560,15 +560,29 @@ func GetUserTopUps(c *gin.Context) {
 		return
 	}
 
+	start, hasStart := c.GetQuery("start_timestamp")
+	end, hasEnd := c.GetQuery("end_timestamp")
+	var dateRange model.TopUpDateRange
+	if hasStart || hasEnd {
+		from, fromErr := strconv.ParseInt(start, 10, 64)
+		until, untilErr := strconv.ParseInt(end, 10, 64)
+		// Keep each historical query bounded; an explicit range replaces the default window.
+		if fromErr != nil || untilErr != nil || from <= 0 || until <= from || until-from > 366*86400 {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		dateRange = model.TopUpDateRange{Start: from, End: until}
+	}
+
 	var (
 		topups []*model.TopUp
 		total  int64
 		err    error
 	)
 	if keyword != "" {
-		topups, total, err = model.SearchUserTopUps(userId, keyword, status, pageInfo)
+		topups, total, err = model.SearchUserTopUps(userId, keyword, status, dateRange, pageInfo)
 	} else {
-		topups, total, err = model.GetUserTopUps(userId, status, pageInfo)
+		topups, total, err = model.GetUserTopUps(userId, status, dateRange, pageInfo)
 	}
 	if err != nil {
 		common.ApiError(c, err)

@@ -292,12 +292,27 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 // topUpQueryWindowSeconds 限制充值记录查询的时间窗口（秒）。
 const topUpQueryWindowSeconds int64 = 30 * 24 * 60 * 60
 
-// topUpQueryCutoff 返回允许查询的最早 create_time（秒级 Unix 时间戳）。
-func topUpQueryCutoff() int64 {
-	return common.GetTimestamp() - topUpQueryWindowSeconds
+// TopUpDateRange uses Unix seconds with an inclusive start and exclusive end.
+// A zero value preserves the rolling 30-day window for existing callers.
+type TopUpDateRange struct {
+	Start int64
+	End   int64
 }
 
-func GetUserTopUps(userId int, status string, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+func userTopUpHistory(tx *gorm.DB, userId int, status string, dates TopUpDateRange) *gorm.DB {
+	query := tx.Model(&TopUp{}).Where("user_id = ?", userId)
+	if dates.End == 0 {
+		query = query.Where("create_time >= ?", common.GetTimestamp()-topUpQueryWindowSeconds)
+	} else {
+		query = query.Where("create_time >= ? AND create_time < ?", dates.Start, dates.End)
+	}
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	return query
+}
+
+func GetUserTopUps(userId int, status string, dates TopUpDateRange, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
 	// Start transaction
 	tx := DB.Begin()
 	if tx.Error != nil {
@@ -309,10 +324,7 @@ func GetUserTopUps(userId int, status string, pageInfo *common.PageInfo) (topups
 		}
 	}()
 
-	query := tx.Model(&TopUp{}).Where("user_id = ? AND create_time >= ?", userId, topUpQueryCutoff())
-	if status != "" {
-		query = query.Where("status = ?", status)
-	}
+	query := userTopUpHistory(tx, userId, status, dates)
 
 	// Get total count within transaction
 	err = query.Count(&total).Error
@@ -370,7 +382,7 @@ func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err 
 const searchTopUpCountHardLimit = 10000
 
 // SearchUserTopUps 按订单号搜索某用户的充值记录
-func SearchUserTopUps(userId int, keyword string, status string, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+func SearchUserTopUps(userId int, keyword string, status string, dates TopUpDateRange, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -381,10 +393,7 @@ func SearchUserTopUps(userId int, keyword string, status string, pageInfo *commo
 		}
 	}()
 
-	query := tx.Model(&TopUp{}).Where("user_id = ? AND create_time >= ?", userId, topUpQueryCutoff())
-	if status != "" {
-		query = query.Where("status = ?", status)
-	}
+	query := userTopUpHistory(tx, userId, status, dates)
 	if keyword != "" {
 		pattern, perr := sanitizeLikePattern(keyword)
 		if perr != nil {

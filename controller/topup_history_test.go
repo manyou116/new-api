@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,6 +28,8 @@ func TestTopUpHistoryStatusFiltersBeforePagination(t *testing.T) {
 		require.NoError(t, sqlDB.Close())
 	})
 	now := common.GetTimestamp()
+	oldStart := now - 60*86400
+	oldEnd := oldStart + 86400
 	records := []model.TopUp{
 		{UserId: 61, TradeNo: "receipt-one", Status: common.TopUpStatusSuccess, CreateTime: now},
 		{UserId: 61, TradeNo: "receipt-pending", Status: common.TopUpStatusPending, CreateTime: now},
@@ -36,8 +39,14 @@ func TestTopUpHistoryStatusFiltersBeforePagination(t *testing.T) {
 		{UserId: 61, TradeNo: "extra-success", Status: common.TopUpStatusSuccess, CreateTime: now},
 		{UserId: 62, TradeNo: "receipt-other", Status: common.TopUpStatusSuccess, CreateTime: now},
 		{UserId: 61, TradeNo: "receipt-old", Status: common.TopUpStatusSuccess, CreateTime: now - 31*24*60*60},
+		{UserId: 61, TradeNo: "archive-start", Status: common.TopUpStatusSuccess, CreateTime: oldStart},
+		{UserId: 61, TradeNo: "archive-last", Status: common.TopUpStatusSuccess, CreateTime: oldEnd - 1},
+		{UserId: 61, TradeNo: "archive-end", Status: common.TopUpStatusSuccess, CreateTime: oldEnd},
+		{UserId: 62, TradeNo: "archive-other", Status: common.TopUpStatusSuccess, CreateTime: oldStart},
+		{UserId: 61, TradeNo: "archive-pending", Status: common.TopUpStatusPending, CreateTime: oldStart},
 	}
 	require.NoError(t, db.Create(&records).Error)
+	archive := fmt.Sprintf("start_timestamp=%d&end_timestamp=%d", oldStart, oldEnd)
 	for _, tc := range []struct {
 		name    string
 		query   string
@@ -57,7 +66,13 @@ func TestTopUpHistoryStatusFiltersBeforePagination(t *testing.T) {
 		{name: "expired filter", query: "status=expired", total: 1, orders: []string{"expired"}},
 		{name: "unknown status rejected", query: "status=complete", invalid: true},
 		{name: "status is not interpreted as SQL", query: "status=success%27%20OR%201=1", invalid: true},
-		{name: "admin history unaffected", admin: true, query: "status=success&page_size=10", total: 8, orders: []string{"receipt-old", "receipt-other", "extra-success", "expired", "failed", "receipt-two", "receipt-pending", "receipt-one"}},
+		{name: "explicit range can select orders older than 30 days with exclusive end", query: "status=success&" + archive, total: 2, orders: []string{"archive-last", "archive-start"}},
+		{name: "range combines with search and applies before pagination", query: "status=success&keyword=archive%25&p=2&page_size=1&" + archive, total: 2, orders: []string{"archive-start"}},
+		{name: "partial range rejected", query: "start_timestamp=1", invalid: true},
+		{name: "malformed range rejected", query: "start_timestamp=abc&end_timestamp=100", invalid: true},
+		{name: "inverted range rejected", query: "start_timestamp=100&end_timestamp=99", invalid: true},
+		{name: "oversized range rejected", query: "start_timestamp=1&end_timestamp=9223372036854775807", invalid: true},
+		{name: "admin history unaffected", admin: true, query: "status=success&page_size=15&" + archive, total: 13, orders: []string{"archive-pending", "archive-other", "archive-end", "archive-last", "archive-start", "receipt-old", "receipt-other", "extra-success", "expired", "failed", "receipt-two", "receipt-pending", "receipt-one"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()

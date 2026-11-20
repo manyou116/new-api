@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
+import { RefreshCw, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
   Badge,
@@ -18,6 +19,7 @@ import { Pagination } from '@/components/pagination'
 import { formatDate, formatNumber } from '@/lib/format'
 import './wallet.css'
 import { PaymentReturnStatus } from './PaymentReturnStatus'
+import { OrderDateFilter, orderDateBounds, orderDatePreset } from './OrderDateFilter'
 
 interface TopupOrder {
   id: number
@@ -40,13 +42,21 @@ export default function OrdersPage() {
   const [pageSize, setPageSize] = useState(15)
   const [search, setSearch] = useState('')
   const [keyword, setKeyword] = useState('')
+  const [dates, setDates] = useState(() => orderDatePreset('last30'))
+  const { start, end } = orderDateBounds(dates)
+  const rangeParams = `start_timestamp=${start}&end_timestamp=${end}`
   const orders = useQuery<OrderPage>({
-    queryKey: ['topup-orders', user?.id, keyword, page, pageSize, 'success'],
+    queryKey: ['topup-orders', user?.id, keyword, page, pageSize, rangeParams],
     placeholderData: (previous, query) =>
-      query?.queryKey[1] === user?.id && query?.queryKey[2] === keyword ? previous : undefined,
-    queryFn: () =>
+      query?.queryKey[1] === user?.id &&
+      query?.queryKey[2] === keyword &&
+      query?.queryKey[5] === rangeParams
+        ? previous
+        : undefined,
+    queryFn: ({ signal }) =>
       request<OrderPage>(
-        `/api/user/topup/self?p=${page}&page_size=${pageSize}&status=success&keyword=${encodeURIComponent(keyword)}`,
+        `/api/user/topup/self?p=${page}&page_size=${pageSize}&status=success&keyword=${encodeURIComponent(keyword)}&${rangeParams}`,
+        { signal },
       ),
   })
   return (
@@ -62,28 +72,42 @@ export default function OrdersPage() {
             onClick={() => void orders.refetch()}
             busy={orders.isFetching}
           >
+            {!orders.isFetching && <RefreshCw size={16} aria-hidden="true" />}
             {t('Refresh')}
           </Button>
         }
       />
-      <form
-        className="row"
-        onSubmit={(event) => {
-          event.preventDefault()
-          setKeyword(search)
-          setPage(1)
-        }}
-      >
-        <Input
-          aria-label={t('Search orders')}
-          placeholder={t('Search by order number')}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
+      <div className="order-filter-bar">
+        <OrderDateFilter
+          value={dates}
+          onChange={(next) => {
+            setDates(next)
+            setPage(1)
+          }}
         />
-        <Button variant="secondary" type="submit">
-          {t('Search')}
-        </Button>
-      </form>
+        <form
+          className="order-filter-search"
+          onSubmit={(event) => {
+            event.preventDefault()
+            setKeyword(search)
+            setPage(1)
+          }}
+        >
+          <Input
+            type="search"
+            aria-label={t('Search orders')}
+            placeholder={t('Search by order number')}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <Button variant="secondary" type="submit" aria-label={t('Search')} title={t('Search')}>
+            <Search size={17} aria-hidden="true" />
+          </Button>
+        </form>
+        <div className="order-filter-dates muted" aria-live="polite">
+          {t('{{from}} to {{through}}', { from: dates.from, through: dates.through })}
+        </div>
+      </div>
       <p className="muted">
         {t(
           'This list shows payment records returned by the server, including wallet recharges and recorded plan payments. Check plan history for activated allowances.',
@@ -113,7 +137,7 @@ export default function OrdersPage() {
             <thead>
               <tr>
                 <th>{t('Order')}</th>
-                <th>{t('Date')}</th>
+                <th>{t('Order date')}</th>
                 <th>{t('Payment method')}</th>
                 <th>{t('Payment amount')}</th>
                 <th>{t('Status')}</th>

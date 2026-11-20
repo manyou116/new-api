@@ -5,7 +5,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
@@ -15,7 +15,10 @@ import OrdersPage from '../OrdersPage'
 
 vi.mock('@/lib/session', () => ({ useSession: () => ({ user: { id: 61 } }) }))
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
 
 async function setup(fetcher: (path: string) => Promise<Response>) {
   clearAuth()
@@ -49,7 +52,7 @@ it('requests the chosen order page and resets to the first page when page size o
   )
   await waitFor(() =>
     expect(fetcher).toHaveBeenCalledWith(
-      '/api/user/topup/self?p=3&page_size=15&status=success&keyword=',
+      expect.stringContaining('/api/user/topup/self?p=3&page_size=15&status=success&keyword='),
       expect.anything(),
     ),
   )
@@ -57,19 +60,75 @@ it('requests the chosen order page and resets to the first page when page size o
   await user.click(await screen.findByRole('option', { name: '30' }))
   await waitFor(() =>
     expect(fetcher).toHaveBeenCalledWith(
-      '/api/user/topup/self?p=1&page_size=30&status=success&keyword=',
+      expect.stringContaining('/api/user/topup/self?p=1&page_size=30&status=success&keyword='),
       expect.anything(),
     ),
   )
   await user.click(await screen.findByRole('button', { name: 'Page 2' }))
-  await user.type(screen.getByRole('textbox', { name: 'Search orders' }), 'abc&123')
+  await user.type(screen.getByRole('searchbox', { name: 'Search orders' }), 'abc&123')
   await user.click(screen.getByRole('button', { name: 'Search' }))
   await waitFor(() =>
     expect(fetcher).toHaveBeenCalledWith(
-      '/api/user/topup/self?p=1&page_size=30&status=success&keyword=abc%26123',
+      expect.stringContaining(
+        '/api/user/topup/self?p=1&page_size=30&status=success&keyword=abc%26123',
+      ),
       expect.anything(),
     ),
   )
+})
+
+it('filters by local calendar days, resets pagination and keeps the applied search', async () => {
+  vi.setSystemTime(new Date(2026, 10, 20, 15))
+  const fetcher = vi.fn(async (_path: string) =>
+    Response.json({ success: true, data: { items: [], total: 65 } }),
+  )
+  await setup(fetcher)
+  const user = userEvent.setup()
+  expect(await screen.findByRole('button', { name: 'Last 30 days' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  await user.type(screen.getByRole('searchbox', { name: 'Search orders' }), 'FP-')
+  await user.click(screen.getByRole('button', { name: 'Search' }))
+  await user.click(await screen.findByRole('button', { name: 'Page 2' }))
+  await user.click(screen.getByRole('button', { name: 'Last 7 days' }))
+  await waitFor(() => {
+    const params = new URL(fetcher.mock.lastCall![0], 'https://example.com').searchParams
+    expect(params.get('p')).toBe('1')
+    expect(params.get('keyword')).toBe('FP-')
+    expect(params.get('start_timestamp')).toBe(String(+new Date(2026, 10, 14) / 1000))
+    expect(params.get('end_timestamp')).toBe(String(+new Date(2026, 10, 21) / 1000))
+  })
+  await user.click(screen.getByRole('button', { name: 'This month' }))
+  await waitFor(() => {
+    const params = new URL(fetcher.mock.lastCall![0], 'https://example.com').searchParams
+    expect(params.get('start_timestamp')).toBe(String(+new Date(2026, 10, 1) / 1000))
+  })
+})
+
+it('applies a valid historical custom range, including its last day', async () => {
+  vi.setSystemTime(new Date(2026, 10, 20, 15))
+  const fetcher = vi.fn(async (_path: string) =>
+    Response.json({ success: true, data: { items: [], total: 0 } }),
+  )
+  await setup(fetcher)
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Custom' }))
+  const dialog = within(await screen.findByRole('dialog'))
+  fireEvent.change(dialog.getByLabelText('From'), { target: { value: '2026-09-30' } })
+  fireEvent.change(dialog.getByLabelText('Until'), { target: { value: '2026-09-01' } })
+  await user.click(dialog.getByRole('button', { name: 'Apply filters' }))
+  expect(dialog.getByRole('alert')).toBeVisible()
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  fireEvent.change(dialog.getByLabelText('From'), { target: { value: '2026-09-01' } })
+  fireEvent.change(dialog.getByLabelText('Until'), { target: { value: '2026-09-30' } })
+  await user.click(dialog.getByRole('button', { name: 'Apply filters' }))
+  await waitFor(() => {
+    const params = new URL(fetcher.mock.lastCall![0], 'https://example.com').searchParams
+    expect(params.get('start_timestamp')).toBe(String(+new Date(2026, 8, 1) / 1000))
+    expect(params.get('end_timestamp')).toBe(String(+new Date(2026, 9, 1) / 1000))
+  })
+  expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute('aria-pressed', 'true')
 })
 
 it('retains visible orders during page loading and removes them when the search changes', async () => {
@@ -115,7 +174,7 @@ it('retains visible orders during page loading and removes them when the search 
   await screen.findByText('fixture-order-two')
   expect(screen.getByTestId('orders-page-status')).toBe(loadingStatus)
   expect(loadingStatus).toHaveTextContent('')
-  await user.type(screen.getByRole('textbox', { name: 'Search orders' }), 'missing')
+  await user.type(screen.getByRole('searchbox', { name: 'Search orders' }), 'missing')
   await user.click(screen.getByRole('button', { name: 'Search' }))
   expect(screen.queryByText('fixture-order-two')).not.toBeInTheDocument()
   await act(async () =>
@@ -147,7 +206,7 @@ it('shows only completed payments from the server and explains an empty payment 
   expect(screen.getByText('Only completed payments are shown.')).toBeVisible()
   expect(screen.getByText('1–1 of 1')).toBeVisible()
   const user = userEvent.setup()
-  await user.type(screen.getByRole('textbox', { name: 'Search orders' }), 'missing')
+  await user.type(screen.getByRole('searchbox', { name: 'Search orders' }), 'missing')
   await user.click(screen.getByRole('button', { name: 'Search' }))
   expect(await screen.findByText('No matching payments')).toBeVisible()
   expect(screen.queryByText('completed-order')).not.toBeInTheDocument()

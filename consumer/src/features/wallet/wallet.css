@@ -332,3 +332,47 @@
     font-size: clamp(1.5rem, 7vw, 2rem);
   }
 }
+.order-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
+}
+.order-date-presets,
+.order-filter-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.order-date-presets {
+  flex-wrap: wrap;
+}
+.order-date-presets .button[aria-pressed='true'] {
+  color: var(--ink);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.order-filter-search {
+  flex: 0 1 320px;
+}
+.order-filter-search .input {
+  flex: 1;
+  min-width: 0;
+}
+.order-filter-search .button {
+  flex: none;
+  width: 40px;
+  padding-inline: 0;
+}
+.order-filter-dates {
+  flex-basis: 100%;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.order-custom-dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 12px;
+}
