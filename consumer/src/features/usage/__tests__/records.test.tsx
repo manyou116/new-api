@@ -347,8 +347,9 @@ it.each([3, undefined])(
     const row = screen.getByRole('row', { name: /fixture-image/ })
     const expected = count === undefined ? 'Image count not recorded' : '3 images'
     expect(row).toHaveTextContent(expected)
-    expect(row).toHaveTextContent('Total duration: 4 s')
-    expect(row).not.toHaveTextContent('Average output speed')
+    expect(within(row).getByRole('cell', { name: /Total duration 4 s/ })).not.toHaveTextContent(
+      'Output speed',
+    )
     await userEvent.setup().click(within(row).getByRole('button', { name: /^View request/ }))
     const dialog = screen.getByRole('dialog', { name: 'Request details' })
     expect(dialog).toHaveTextContent(expected)
@@ -434,14 +435,6 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
   expect(cacheHelp).not.toBeVisible()
   await userEvent.setup().click(screen.getByText('Details', { selector: 'summary' }))
   expect(cacheHelp).toBeVisible()
-  expect(screen.getByRole('table')).toHaveTextContent(
-    /First response latency: 1 s\s*\/Total duration: 4 s/,
-  )
-  const timingCell = within(screen.getByRole('table')).getByRole('cell', {
-    name: /Average output speed:\s*50 token\/s/,
-  })
-  expect(timingCell).toHaveTextContent('50 token/s')
-  expect(timingCell).toBeVisible()
   expect(screen.getByText('100%')).toBeVisible()
   expect(screen.getByText('Cache hit rate')).toBeVisible()
   expect(screen.getByText('Cached share of input tokens: 40%')).toBeVisible()
@@ -475,7 +468,9 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
 it('shows that average output speed is unavailable for a non-streamed request', async () => {
   await renderUsage(undefined, undefined, undefined, undefined, { is_stream: false })
   const row = await screen.findByRole('row', { name: /fixture-chat/ })
-  const timing = within(row).getByRole('cell', { name: /Average output speed:\s*Not recorded/ })
+  const timing = within(row).getByRole('cell', {
+    name: /Total duration.*Output speed Not recorded/,
+  })
   expect(timing).not.toHaveTextContent('token/s')
 })
 
@@ -589,9 +584,11 @@ it('opens a key-specific history with precise identity, matching spending and al
 it('shows missing text timings explicitly instead of inventing a first response or total duration', async () => {
   await renderUsage(undefined, undefined, undefined, undefined, { use_time: 0, other: '{}' })
   await screen.findByText('fixture-chat')
-  expect(screen.getByRole('table')).toHaveTextContent(
-    /First response latency: —\s*\/Total duration: —/,
-  )
+  expect(
+    within(screen.getByRole('row', { name: /fixture-chat/ })).getByRole('cell', {
+      name: /First response.*Total duration.*Output speed Not recorded/,
+    }),
+  ).toHaveTextContent('First response—Total duration—Output speed—Not recorded')
 })
 
 it('retains the table and paging controls while the next page loads and prevents stale record actions', async () => {
@@ -630,7 +627,26 @@ it('does not label prior records as belonging to newly applied filters while loa
   await screen.findByText('fixture-chat')
 })
 
-it('groups request metrics, API key and charged group into five columns and preserves the exact model ID in the keyboard-accessible drawer', async () => {
+it('keeps first response, total duration and output speed together in the final Latency column', async () => {
+  await renderUsage(undefined, undefined, undefined, undefined, {
+    use_time: 8,
+    other: '{"frt":800,"cache_tokens":400}',
+  })
+  const row = await screen.findByRole('row', { name: /fixture-chat/ })
+  const headings = within(screen.getByRole('table')).getAllByRole('columnheader')
+  expect(headings).toHaveLength(5)
+  expect(headings[3]).toHaveTextContent('Cost')
+  expect(headings.at(-1)).toHaveAccessibleName('Latency')
+  const timing = within(row).getByRole('cell', {
+    name: 'First response 800 ms Total duration 8 s Output speed 25 token/s',
+  })
+  expect(within(row).getAllByRole('cell').at(-1)).toBe(timing)
+  expect(within(timing).getByText('First response')).toBeVisible()
+  expect(within(timing).getByText('Total duration')).toBeVisible()
+  expect(within(timing).getByText('25 token/s')).toBeVisible()
+})
+
+it('preserves the exact model ID in the keyboard-accessible drawer', async () => {
   await renderUsage(undefined, undefined, undefined, undefined, {
     model_name: 'gpt-6.2-sol',
     use_time: 8,
@@ -639,12 +655,9 @@ it('groups request metrics, API key and charged group into five columns and pres
   const row = await screen.findByRole('row', { name: /GPT-6.2 Sol/ })
   const table = screen.getByRole('table')
   const headings = within(table).getAllByRole('columnheader')
-  expect(headings).toHaveLength(5)
   expect(headings[1]).toHaveTextContent('API key / charged group')
   expect(within(row).getAllByRole('cell')[1]).toHaveTextContent(/Editor.*default/)
-  expect(headings[2]).toHaveTextContent('First response / total duration')
-  expect(headings[3]).toHaveTextContent(/Input tokens.*Output tokens.*Cache read tokens/)
-  expect(row).toHaveTextContent(/First response latency: 800 ms.*Total duration: 8 s/)
+  expect(headings[2]).toHaveTextContent(/Input tokens.*Output tokens.*Cache read tokens/)
   expect(row).toHaveTextContent(/Input tokens: 1,000.*Output tokens: 200.*Cache read tokens: 400/)
   expect(row).toHaveTextContent('$0.000002')
   const trigger = within(row).getByRole('button', { name: 'View request req-synthetic' })
@@ -672,7 +685,7 @@ it.each([
     other: JSON.stringify({ frt }),
   })
   const row = await screen.findByRole('row', { name: /fixture-chat/ })
-  const firstInRow = within(row).getByTitle('First response latency')
+  const firstInRow = within(row).getByText('First response').nextElementSibling
   await userEvent.click(within(row).getByRole('button', { name: 'View request req-synthetic' }))
   const details = screen.getByRole('region', { name: 'Response performance' })
   const firstInDetails = within(details).getByText('First response latency').nextElementSibling
@@ -686,7 +699,9 @@ it.each([
     expect(firstInRow).not.toHaveAttribute('data-latency')
     expect(firstInDetails).not.toHaveAttribute('data-latency')
   }
-  expect(within(row).getByTitle('Total duration')).not.toHaveAttribute('data-latency')
+  expect(within(row).getByText('Total duration').nextElementSibling).not.toHaveAttribute(
+    'data-latency',
+  )
   expect(within(details).getByText('Total duration').nextElementSibling).not.toHaveAttribute(
     'data-latency',
   )
@@ -709,6 +724,10 @@ it('keeps long request identifiers available in the detail and returns focus aft
     request_id: identifier,
   })
   const button = await screen.findByRole('button', { name: /^View request/ })
+  expect(screen.getByText('long-model-name-'.repeat(15))).toHaveAttribute(
+    'title',
+    'long-model-name-'.repeat(15),
+  )
   await userEvent.setup().click(button)
   const dialog = screen.getByRole('dialog', { name: 'Request details' })
   expect(within(dialog).getByText(identifier)).toBeVisible()

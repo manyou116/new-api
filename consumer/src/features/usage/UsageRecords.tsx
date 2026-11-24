@@ -26,10 +26,11 @@ export function UsageRecords(props: {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const site = useStatus()
-  const timingLabel = t('First response / total duration')
-  const speedLabel = t('Average output speed')
-  const speedHelp = t(
-    'Speed includes waiting time; only streamed text with recorded output and duration is measured.',
+  const firstResponseHelp = t(
+    'Time to the first upstream stream event; this may precede the first text token.',
+  )
+  const outputSpeedHelp = t(
+    'Output speed is output tokens divided by total recorded duration, including first-response latency. It is shown only for streamed text consumption.',
   )
   return (
     <div className="usage-records" aria-busy={props.busy}>
@@ -38,16 +39,7 @@ export function UsageRecords(props: {
           <tr>
             <th scope="col">{t('Model / time')}</th>
             <th scope="col">{t('API key / charged group')}</th>
-            <th
-              scope="col"
-              title={t(
-                'Time to the first upstream stream event; this may precede the first text token.',
-              )}
-            >
-              {timingLabel}
-              <span className="usage-speed-label">{speedLabel}</span>
-            </th>
-            <th scope="col">
+            <th scope="col" className="usage-record-quantity">
               {t('Usage quantity')}
               <span className="usage-token-legend">
                 <span>
@@ -64,7 +56,12 @@ export function UsageRecords(props: {
                 </span>
               </span>
             </th>
-            <th scope="col">{t('Cost')}</th>
+            <th scope="col" className="usage-record-cost">
+              {t('Cost')}
+            </th>
+            <th scope="col" className="usage-record-performance">
+              {t('Latency')}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -82,16 +79,19 @@ export function UsageRecords(props: {
                 stream.status === 'error')
             const first = timing.firstResponse
             const duration = timing.duration
+            const cost = formatQuota(log.quota, site.data, locale)
             return (
               <tr key={log.id} data-selected={props.selectedID === log.id || undefined}>
-                <td>
+                <td className="usage-record-identity">
                   <div className="usage-context">
-                    <strong title={log.model_name}>{usageModelName(log.model_name)}</strong>
+                    <strong className="usage-record-model" title={log.model_name}>
+                      {usageModelName(log.model_name)}
+                    </strong>
                     <span className="usage-record-date">{formatDate(log.created_at, locale)}</span>
                     {showStatus && <RequestStatus log={log} />}
                   </div>
                 </td>
-                <td data-label={t('API key / charged group')}>
+                <td className="usage-record-access">
                   <div className="usage-context">
                     <span className="usage-key-name">{log.token_name || '—'}</span>
                     <span className="usage-charged-group">
@@ -100,43 +100,7 @@ export function UsageRecords(props: {
                     </span>
                   </div>
                 </td>
-                <td data-label={hasTextUsage ? `${timingLabel} · ${speedLabel}` : timingLabel}>
-                  <div className="usage-record-timing">
-                    <span data-latency={latencyBand(first)} title={t('First response latency')}>
-                      <span className="sr-only">{t('First response latency')}: </span>
-                      {formatDurationMilliseconds(
-                        first === undefined ? undefined : first * 1000,
-                        locale,
-                        'abbreviated',
-                      )}
-                    </span>
-                    <span className="muted" aria-hidden="true">
-                      /
-                    </span>
-                    <span title={t('Total duration')}>
-                      <span className="sr-only">{t('Total duration')}: </span>
-                      {formatDurationMilliseconds(
-                        duration === undefined ? undefined : duration * 1000,
-                        locale,
-                        'abbreviated',
-                      )}
-                    </span>
-                  </div>
-                  {hasTextUsage && (
-                    <div className="usage-output-speed" title={speedHelp}>
-                      <span className="sr-only">{speedLabel}: </span>
-                      {timing.tokensPerSecond === undefined ? (
-                        <>
-                          <span aria-hidden="true">—</span>
-                          <span className="sr-only">{t('Not recorded')}</span>
-                        </>
-                      ) : (
-                        formatOutputSpeed(timing.tokensPerSecond, locale)
-                      )}
-                    </div>
-                  )}
-                </td>
-                <td data-label={t('Usage quantity')}>
+                <td className="usage-record-quantity" data-label={t('Usage quantity')}>
                   {log.type !== 2 && '—'}
                   {log.type === 2 && metric.kind === 'images' && (
                     <span className="usage-token-value">
@@ -171,9 +135,11 @@ export function UsageRecords(props: {
                     </div>
                   )}
                 </td>
-                <td data-label={t('Cost')} className="usage-record-cost">
+                <td className="usage-record-cost">
                   <div>
-                    {formatQuota(log.quota, site.data, locale)}
+                    <span className="usage-record-amount" title={cost}>
+                      {cost}
+                    </span>
                     <Button
                       className="icon-button usage-record-open"
                       disabled={props.stale}
@@ -186,6 +152,47 @@ export function UsageRecords(props: {
                       <ChevronRight size={16} aria-hidden="true" />
                     </Button>
                   </div>
+                </td>
+                <td className="usage-record-performance">
+                  <dl className="usage-record-timing">
+                    {hasTextUsage && (
+                      <>
+                        <dt title={firstResponseHelp}>{t('First response')}</dt>
+                        <dd data-latency={latencyBand(first)}>
+                          {formatDurationMilliseconds(
+                            first === undefined ? undefined : first * 1000,
+                            locale,
+                            'abbreviated',
+                          )}
+                        </dd>
+                      </>
+                    )}
+                    <dt>{t('Total duration')}</dt>
+                    <dd>
+                      {formatDurationMilliseconds(
+                        duration === undefined ? undefined : duration * 1000,
+                        locale,
+                        'abbreviated',
+                      )}
+                    </dd>
+                    {hasTextUsage && (
+                      <>
+                        <dt title={outputSpeedHelp}>{t('Output speed')}</dt>
+                        <dd>
+                          {timing.tokensPerSecond === undefined ? (
+                            <>
+                              <span className="muted" aria-hidden="true">
+                                —
+                              </span>
+                              <span className="sr-only">{t('Not recorded')}</span>
+                            </>
+                          ) : (
+                            formatOutputSpeed(timing.tokensPerSecond, locale)
+                          )}
+                        </dd>
+                      </>
+                    )}
+                  </dl>
                 </td>
               </tr>
             )
