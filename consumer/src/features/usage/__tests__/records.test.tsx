@@ -437,6 +437,11 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
   expect(screen.getByRole('table')).toHaveTextContent(
     /First response latency: 1 s\s*\/Total duration: 4 s/,
   )
+  const timingCell = within(screen.getByRole('table')).getByRole('cell', {
+    name: /Average output speed:\s*50 token\/s/,
+  })
+  expect(timingCell).toHaveTextContent('50 token/s')
+  expect(timingCell).toBeVisible()
   expect(screen.getByText('100%')).toBeVisible()
   expect(screen.getByText('Cache hit rate')).toBeVisible()
   expect(screen.getByText('Cached share of input tokens: 40%')).toBeVisible()
@@ -454,7 +459,9 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
   const dialog = screen.getByRole('dialog')
   expect(dialog).toHaveTextContent('Total duration4 s')
   expect(dialog).toHaveTextContent('First response latency1 s')
-  expect(dialog).toHaveTextContent('Average output speed: 50 token/s')
+  expect(within(dialog).getByRole('region', { name: 'Response performance' })).toHaveTextContent(
+    'Average output speed50 token/s',
+  )
   await userEvent.click(within(dialog).getByText('Token usage', { selector: 'summary' }))
   expect(within(dialog).queryByText('Cache hit rate')).not.toBeInTheDocument()
   expect(within(dialog).getByText('Cache read share')).toBeVisible()
@@ -463,6 +470,13 @@ it('shows scoped cache totals and distinct streamed throughput, first-response a
     'value',
     '40',
   )
+})
+
+it('shows that average output speed is unavailable for a non-streamed request', async () => {
+  await renderUsage(undefined, undefined, undefined, undefined, { is_stream: false })
+  const row = await screen.findByRole('row', { name: /fixture-chat/ })
+  const timing = within(row).getByRole('cell', { name: /Average output speed:\s*Not recorded/ })
+  expect(timing).not.toHaveTextContent('token/s')
 })
 
 it('counts cache-hit requests independently of token sizes and excludes unknown, failure and image records', async () => {

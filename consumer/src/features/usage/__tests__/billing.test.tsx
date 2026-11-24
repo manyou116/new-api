@@ -61,7 +61,9 @@ it('shows the recorded tier, full context and historical free unit price without
   const performance = screen.getByRole('region', { name: 'Response performance' })
   expect(performance).toHaveTextContent('First response latency18.93 s')
   expect(performance).toHaveTextContent('Total duration36 s')
-  expect(screen.getByText('Average output speed: 8.61 token/s')).toBeVisible()
+  expect(
+    within(screen.getByRole('region', { name: 'Response performance' })).getByText('8.61 token/s'),
+  ).toBeVisible()
   expect(within(performance).getByText('18.93 s')).toHaveAttribute(
     'title',
     'Time to the first upstream stream event; this may precede the first text token.',

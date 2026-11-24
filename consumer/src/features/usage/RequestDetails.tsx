@@ -16,7 +16,7 @@ import { formatDate, formatDurationMilliseconds, formatNumber, formatQuota } fro
 import { useStatus } from '@/lib/status'
 import { BillingDetails } from './BillingDetails'
 import { usageCache, usageDetails, usageMetric, usageTiming } from './chart'
-import { latencyBand, usageModelName } from './presentation'
+import { formatOutputSpeed, latencyBand, usageModelName } from './presentation'
 import type { UsageLog } from './UsagePage'
 
 /** Billing records alone do not prove that an upstream response finished. */
@@ -213,6 +213,20 @@ export function RequestDetails(props: { log: UsageLog }) {
                 )}
               </dd>
             </div>
+            {log.type === 2 && metric.kind === 'tokens' && (
+              <div
+                title={t(
+                  'Speed includes waiting time; only streamed text with recorded output and duration is measured.',
+                )}
+              >
+                <dt>{t('Average output speed')}</dt>
+                <dd>
+                  {timing.tokensPerSecond === undefined
+                    ? t('Not recorded')
+                    : formatOutputSpeed(timing.tokensPerSecond, locale)}
+                </dd>
+              </div>
+            )}
             <div>
               <dt>{t('Recorded amount')}</dt>
               <dd>{amount}</dd>
@@ -241,17 +255,6 @@ export function RequestDetails(props: { log: UsageLog }) {
           <summary>{t('Billing details')}</summary>
           <BillingDetails other={log.other} />
         </details>
-      )}
-      {timing.tokensPerSecond !== undefined && (
-        <p
-          className="muted request-throughput"
-          title={t(
-            'Speed includes waiting time; only streamed text with recorded output and duration is measured.',
-          )}
-        >
-          {t('Average output speed')}:{' '}
-          {formatNumber(timing.tokensPerSecond, locale, { maximumFractionDigits: 2 })} token/s
-        </p>
       )}
       <footer className="request-detail-footer">
         <dl className="details-list">

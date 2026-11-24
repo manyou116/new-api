@@ -26,11 +26,27 @@ export function RouteError(props: Pick<ErrorComponentProps, 'error'>) {
   const { t } = useTranslation()
   const router = useRouter()
   const session = useSession()
+  const chunkFailed =
+    props.error instanceof Error &&
+    (props.error.name === 'ChunkLoadError' ||
+      /^(?:Loading (?:CSS )?chunk .+ failed|Failed to fetch dynamically imported module|Importing a module script failed)/i.test(
+        props.error.message,
+      ))
   return (
     <div className="state">
       <ErrorState
-        error={props.error}
+        error={
+          chunkFailed
+            ? new Error('Some page files could not load. Refresh the page to try again.')
+            : props.error
+        }
+        retryLabel={chunkFailed ? t('Refresh page') : undefined}
         retry={() => {
+          // React.lazy remembers the rejected import in this document.
+          if (chunkFailed) {
+            window.location.reload()
+            return
+          }
           void (async () => {
             if (session.authenticationError) await session.retryAuthentication()
             await router.invalidate()

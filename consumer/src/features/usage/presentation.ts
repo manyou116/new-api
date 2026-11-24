@@ -1,3 +1,9 @@
+import { formatNumber } from '@/lib/format'
+
+export function formatOutputSpeed(tokensPerSecond: number, locale: string): string {
+  return `${formatNumber(tokensPerSecond, locale, { maximumFractionDigits: 2 })} token/s`
+}
+
 /** Keep unknown model IDs intact, including private aliases and provider suffixes. */
 export function usageModelName(id: string): string {
   const image = /^gpt-image-(\d+(?:\.\d+)?)$/.exec(id)

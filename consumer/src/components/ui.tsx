@@ -211,7 +211,12 @@ export function LoadingState() {
     </div>
   )
 }
-export function ErrorState(props: { error: unknown; retry?: () => void; title?: string }) {
+export function ErrorState(props: {
+  error: unknown
+  retry?: () => void
+  retryLabel?: string
+  title?: string
+}) {
   const { t } = useTranslation()
   const message =
     props.error instanceof Error
@@ -231,7 +236,7 @@ export function ErrorState(props: { error: unknown; retry?: () => void; title?: 
       </p>
       {props.retry && (
         <Button variant="secondary" onClick={props.retry}>
-          {t('Try again')}
+          {props.retryLabel ?? t('Try again')}
         </Button>
       )}
     </div>

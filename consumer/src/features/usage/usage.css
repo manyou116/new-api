@@ -587,6 +587,18 @@
 .usage-record-timing [data-latency] {
   font-weight: 650;
 }
+.usage-speed-label,
+.usage-output-speed {
+  display: block;
+  margin-top: 3px;
+}
+.usage-speed-label {
+  color: var(--muted);
+  font-weight: 400;
+}
+.usage-output-speed {
+  font-weight: 600;
+}
 .usage-record-cost {
   font-weight: 600;
   text-align: right;
@@ -1064,10 +1076,6 @@
   overflow-wrap: anywhere;
   text-align: right;
 }
-.request-throughput {
-  font-size: 12px;
-}
-
 .usage-tier-receipt {
   display: grid;
   gap: 8px;

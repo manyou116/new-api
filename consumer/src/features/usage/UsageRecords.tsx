@@ -13,7 +13,7 @@ import { formatDate, formatDurationMilliseconds, formatNumber, formatQuota } fro
 import { useStatus } from '@/lib/status'
 import { usageCache, usageDetails, usageMetric, usageTiming } from './chart'
 import { RequestStatus } from './RequestDetails'
-import { latencyBand, usageModelName } from './presentation'
+import { formatOutputSpeed, latencyBand, usageModelName } from './presentation'
 import type { UsageLog } from './UsagePage'
 
 export function UsageRecords(props: {
@@ -27,6 +27,10 @@ export function UsageRecords(props: {
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const site = useStatus()
   const timingLabel = t('First response / total duration')
+  const speedLabel = t('Average output speed')
+  const speedHelp = t(
+    'Speed includes waiting time; only streamed text with recorded output and duration is measured.',
+  )
   return (
     <div className="usage-records" aria-busy={props.busy}>
       <table className="consumer-table usage-record-table">
@@ -41,6 +45,7 @@ export function UsageRecords(props: {
               )}
             >
               {timingLabel}
+              <span className="usage-speed-label">{speedLabel}</span>
             </th>
             <th scope="col">
               {t('Usage quantity')}
@@ -66,6 +71,7 @@ export function UsageRecords(props: {
           {props.logs.map((log) => {
             const metric = usageMetric(log)
             const timing = usageTiming(log)
+            const hasTextUsage = log.type === 2 && metric.kind === 'tokens'
             const cache = log.type === 2 ? usageCache(log.other, log.prompt_tokens) : undefined
             const stream = usageDetails(log.other).stream_status
             const showStatus =
@@ -94,7 +100,7 @@ export function UsageRecords(props: {
                     </span>
                   </div>
                 </td>
-                <td data-label={timingLabel}>
+                <td data-label={hasTextUsage ? `${timingLabel} · ${speedLabel}` : timingLabel}>
                   <div className="usage-record-timing">
                     <span data-latency={latencyBand(first)} title={t('First response latency')}>
                       <span className="sr-only">{t('First response latency')}: </span>
@@ -116,6 +122,19 @@ export function UsageRecords(props: {
                       )}
                     </span>
                   </div>
+                  {hasTextUsage && (
+                    <div className="usage-output-speed" title={speedHelp}>
+                      <span className="sr-only">{speedLabel}: </span>
+                      {timing.tokensPerSecond === undefined ? (
+                        <>
+                          <span aria-hidden="true">—</span>
+                          <span className="sr-only">{t('Not recorded')}</span>
+                        </>
+                      ) : (
+                        formatOutputSpeed(timing.tokensPerSecond, locale)
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td data-label={t('Usage quantity')}>
                   {log.type !== 2 && '—'}
@@ -127,7 +146,7 @@ export function UsageRecords(props: {
                         : t('{{count}} images', { count: formatNumber(metric.count, locale) })}
                     </span>
                   )}
-                  {log.type === 2 && metric.kind === 'tokens' && (
+                  {hasTextUsage && (
                     <div className="usage-token-stack">
                       <div className="usage-token-pair">
                         <span className="usage-token-value" title={t('Input tokens')}>
